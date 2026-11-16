@@ -1,0 +1,127 @@
+# Development
+
+## Repository layout
+```
+multiput/
+├── README.md               user guide: install, use, security, building
+├── LICENSE, NOTICE         Apache 2.0 license and the attribution that redistributors must carry
+├── THIRD_PARTY_NOTICES.md  licenses of components inside the firmware and installer
+├── VERSION                 the version number (single source; see Versioning and releases)
+├── CHANGELOG.md            what changed in each version
+├── .gitattributes          keeps .sh files LF and .bat files CRLF
+├── multiput.bat            run from source without installing (double-click)
+├── docs/
+│   ├── how-it-works.md     hardware and end-to-end flow
+│   ├── performance.md      the performance test: how to run it, and measured results
+│   └── development.md      this file
+├── pc/                     the Windows program (multiput.exe)
+│   ├── multiput.py         entry point: command line, main loop
+│   ├── controller.py       reads the Xbox controller (XInput), builds the Switch report, button mapping
+│   ├── protocol.py         signing and the session with the Pico (PC half of protocol.h)
+│   ├── links.py            Wi-Fi (UDP) and Bluetooth (COM port) connections, with reconnecting; finds the Pico's COM port
+│   ├── setup_wizard.py     multiput --setup: prompts, finding the Pico drive, flashing
+│   ├── firmware.py         writes the settings block into a generic .uf2
+│   ├── settings_store.py   the key and saved settings in %APPDATA%\multiput
+│   ├── perf.py             multiput --perf-test: round-trip measurement over each link
+│   └── version.py          reads VERSION; the banner shown by --version and at startup
+├── pico/multiput_pico/     the Pico W firmware (Arduino sketch; the folder must match the .ino name)
+│   ├── multiput_pico.ino   USB controller (HORIPAD S), main loop, settings block
+│   ├── protocol.h          wire protocol: frame parsing, signature check, sync
+│   ├── settings.h          layout of the settings block that --setup fills in
+│   ├── transport_wifi.h    Wi-Fi link (UDP, multiput.local); power-save while Bluetooth is in use
+│   ├── transport_bt.h      Bluetooth link; stops listening while Wi-Fi is in use
+│   └── transport_bt_serial.cpp   SerialBT wrapper, separate because its headers clash with TinyUSB
+├── tools/
+│   ├── build_firmware.sh   builds build/firmware/multiput.uf2 (WSL/Linux)
+│   ├── build.bat           one-step build: firmware + tests (via WSL), then the installer
+│   ├── build_installer.bat builds multiput.exe and the installer (Windows)
+│   ├── run_tests.sh        runs all the test files (WSL/Linux)
+│   └── multiput.iss        Inno Setup installer definition
+├── tests/
+│   ├── test_protocol.py    PC protocol + links against the Pico's protocol.h compiled for the desktop
+│   ├── protocol_sim.cpp    that desktop build of protocol.h
+│   ├── test_setup.py       .uf2 settings patching and the --setup flow
+│   ├── test_controller.py  button mapping, --remap, pause combos, M-key editing
+│   └── test_perf.py        the performance test's measuring logic, against a fake Pico
+└── build/                  everything generated (git-ignored)
+```
+
+Things that must stay in sync across the two halves:
+- the wire protocol: `pc/protocol.py` and `pico/multiput_pico/protocol.h` (`tests/test_protocol.py` checks them against each other);
+- the settings block: `pc/firmware.py` (`SETTINGS_FORMAT`) and `pico/multiput_pico/settings.h` (both assert its size, 147 bytes).
+
+## Overriding setup
+Every setup prompt has a matching option. Anything you leave out is still asked for. Run `multiput --help` for the full list.
+
+| Option | Instead of |
+|---|---|
+| `--no-wifi` | the "Set up Wi‑Fi?" question, answering no (Bluetooth only) |
+| `--link wifi` / `--link bt` | the "Which link should multiput use?" question |
+| `--ssid NAME` | the Wi‑Fi name prompt (which defaults to the last network used; the name is saved in `settings.json`, the password never is) |
+| `--password PASS` | the hidden password prompt. Avoid it: the password ends up in your shell history. |
+| `--port COM5` | the Bluetooth COM port prompt (normally pre-filled by auto-detection) |
+| `--drive E:\` | waiting for the Pico's drive to appear |
+| `--firmware my.uf2` | the bundled generic firmware (for example, your own build) |
+| `--output configured.uf2` | flashing. Writes the configured file instead, which you then drag onto the Pico yourself. It contains your Wi‑Fi password, so delete it afterwards. |
+| `--new-key` | reusing the saved key (rotates it) |
+| `--allow-unsigned` | the default of rejecting unsigned packets. Not recommended: pair it with `--insecure` when running. |
+| `HOST` (positional) | `multiput.local` as the saved Pico address, e.g. `multiput --setup 192.168.1.50` |
+
+Example: `multiput --setup --link wifi --ssid HomeNet --drive E:\`
+
+## Overriding at run time
+- `multiput 192.168.1.50`: use this IP instead of the saved address, for networks that block `.local` names.
+- `multiput --perf-test`: measure the round trip over each link (see [Performance](performance.md)). It refuses to run alongside multiput; a named mutex (`Local\multiput`) stops two copies running at once.
+- `multiput --link wifi` / `--link bt`: switch link; remembered as the default. The Pico listens on both (see the README).
+- `multiput --bt COM5`: use Bluetooth on this port, skipping auto-detection. Without it, multiput finds the port of the paired device named `multiput`: Windows stores the device's Bluetooth address under `HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices`, and the outgoing COM port's hardware ID contains that address. It falls back to the saved port if that fails.
+- `multiput --controller 1`: use another XInput slot (0–3).
+- `multiput --remap XBOX=SWITCH ... PAUSE=A+B,C`: change the button mapping and pause combos (saved as `"buttons"` and `"pause"` in `settings.json`, only where they differ from the default; `"pause"` is a list of combos, and the older single-combo form `["XBOX"]` is still read). `--remap` alone opens the interactive editor, or just prints the mapping when there's no console. Pressing M in the running multiput window opens the same editor, and changes there apply immediately. `reset` clears everything. See the README's Mapping section for names.
+- `multiput --insecure`: send unsigned packets. The Pico must have been set up with `--allow-unsigned`.
+- `multiput --config-dir DIR`: keep the key and settings somewhere other than `%APPDATA%\multiput`, for example to run two separate setups.
+
+## Running from source
+Python 3.11+ on Windows (older versions poll the controller too slowly); Bluetooth also needs `pip install pyserial`. Build the firmware first (below), then:
+```
+python pc\multiput.py --setup
+python pc\multiput.py
+```
+For a clickable icon without the installer, double-click `multiput.bat` in the repo root, or right-click it → **Send to → Desktop (create shortcut)**. It passes options through, e.g. `multiput.bat --setup`, and keeps the window open if something fails.
+
+## Building
+The README's [Building from source](../README.md#building-from-source) covers the scripted build (`tools\build.bat`, or each step on its own). Details:
+- **Firmware:** `tools/build_firmware.sh` installs `arduino-cli` into `~/.local/bin` and the rp2040 board core on first use. It passes the board URL on the command line, so your `arduino-cli` config isn't changed. Set `ARDUINO_CLI` to use a different `arduino-cli`. It warns if the installed core isn't the tested version (6.3.2). After building, it checks that the settings block landed in flash at 147 bytes.
+- **From the Arduino IDE:** open `pico/multiput_pico/multiput_pico.ino` and select board **Raspberry Pi Pico W** and USB Stack **Adafruit TinyUSB**. IP/Bluetooth Stack **IPv4 + Bluetooth**; the firmware uses both, so any other stack option stops the compile with an error saying so. Use Sketch → Export Compiled Binary, then configure the result with `multiput --setup --firmware <file>.uf2`. Uploading straight from the IDE gives a blank firmware (triple blink).
+- **Installer:** `tools\build_installer.bat` builds `multiput.exe` with PyInstaller in `build\venv`, then the installer from `tools/multiput.iss`, installing Inno Setup with winget if needed. To release a new version, bump `AppVersion` in `tools/multiput.iss`.
+- **Logs** (all in `build\logs\`, replaced on each run):
+  - `build.log`: everything `tools\build.bat` prints. It's written through PowerShell, because `cmd` can't show output and save it at the same time. Use `tools\build.bat --no-log` to skip it.
+  - `firmware.log`: the full compiler output, also written when `tools/build_firmware.sh` runs on its own.
+  - PyInstaller's missing-module report is in `build\work\multiput\warn-multiput.txt`.
+- **Line endings:** `.gitattributes` keeps `*.sh` as LF and `*.bat` as CRLF, since each breaks with the other's line endings.
+
+## Versioning and releases
+multiput uses [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, starting at 0.1.0. While below 1.0, the PC–Pico protocol may still change.
+
+| Bump | When |
+|---|---|
+| **MAJOR** | The PC and a Pico on the previous version can no longer work together, e.g. a protocol or settings-block change. Below 1.0, bump MINOR for these instead. |
+| **MINOR** | New features that stay compatible. |
+| **PATCH** | Fixes only. |
+
+**One source of truth:** the `VERSION` file at the repo root. It feeds:
+- `multiput --version` and the startup banner, through `pc/version.py`. The file is bundled into `multiput.exe`.
+- the installer's version and file name (`multiput-setup-<version>.exe`), passed to Inno Setup by `tools/build_installer.bat`.
+
+The firmware doesn't carry the version yet; that comes with the firmware version check in `TODO`.
+
+**Releasing:**
+1. Move the `CHANGELOG.md` entries from "Unreleased" under a new `## [X.Y.Z] - YYYY-MM-DD` heading, and set `VERSION` to `X.Y.Z`.
+2. Run `tools\build.bat`, which builds and tests everything.
+3. Commit, tag `vX.Y.Z`, and push the tag.
+4. Create a GitHub release from the tag and attach `build\installer\multiput-setup-X.Y.Z.exe` and `build\firmware\multiput.uf2`.
+
+## Tests (WSL/Linux; need Python 3, gcc/g++, and the rp2040 core)
+`tools/run_tests.sh` runs them all:
+- `python3 tests/test_protocol.py`: the PC's real signing code against the Pico's `protocol.h`, compiled on the desktop with the core's own BearSSL.
+- `python3 tests/test_setup.py`: settings patching (including the built `.uf2` files) and the `--setup` flow.
+- `python3 tests/test_controller.py`: button mapping, `--remap`, pause combos, and M-key editing.
+- `python3 tests/test_perf.py`: the performance test's measuring logic, against a fake Pico.

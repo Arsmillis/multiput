@@ -1,0 +1,3 @@
+# Everything generated (firmware, exe, installer, build venv) goes in build/
+build/
+__pycache__/

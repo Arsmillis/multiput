@@ -1,0 +1,4 @@
+# Shell scripts must keep LF and batch files CRLF, whatever git's autocrlf says,
+# because the build runs them from both WSL and Windows.
+*.sh text eol=lf
+*.bat text eol=crlf

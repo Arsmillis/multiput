@@ -1,0 +1,186 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 Arsmillis (https://github.com/Arsmillis/multiput)
+"""Reading the Xbox controller (XInput) and turning its state into a Switch report.
+
+The report is the 8-byte HID input report of a HORIPAD S, which the Pico passes
+to the Switch unchanged.
+"""
+
+import ctypes
+import struct
+
+TRIGGER_THRESHOLD = 30  # 0-255; analog trigger -> digital ZL/ZR
+
+# XInput button bits
+X_UP, X_DOWN, X_LEFT, X_RIGHT = 0x0001, 0x0002, 0x0004, 0x0008
+X_START, X_BACK, X_LTHUMB, X_RTHUMB = 0x0010, 0x0020, 0x0040, 0x0080
+X_LB, X_RB, X_GUIDE = 0x0100, 0x0200, 0x0400
+X_A, X_B, X_X, X_Y = 0x1000, 0x2000, 0x4000, 0x8000
+
+# Switch (HORIPAD) button bits
+S_Y, S_B, S_A, S_X = 1 << 0, 1 << 1, 1 << 2, 1 << 3
+S_L, S_R, S_ZL, S_ZR = 1 << 4, 1 << 5, 1 << 6, 1 << 7
+S_MINUS, S_PLUS, S_LCLICK, S_RCLICK, S_HOME = 1 << 8, 1 << 9, 1 << 10, 1 << 11, 1 << 12
+S_CAPTURE = 1 << 13
+
+# Button names, as used by `multiput --remap XBOX=SWITCH`. The d-pad and sticks aren't remappable.
+XBOX_BUTTONS = {
+    "A": X_A, "B": X_B, "X": X_X, "Y": X_Y, "LB": X_LB, "RB": X_RB,
+    "LT": None, "RT": None,  # analog triggers: pressed past TRIGGER_THRESHOLD
+    "VIEW": X_BACK, "MENU": X_START, "LS": X_LTHUMB, "RS": X_RTHUMB, "XBOX": X_GUIDE,
+}
+SWITCH_BUTTONS = {
+    "A": S_A, "B": S_B, "X": S_X, "Y": S_Y, "L": S_L, "R": S_R, "ZL": S_ZL, "ZR": S_ZR,
+    "MINUS": S_MINUS, "PLUS": S_PLUS, "LSTICK": S_LCLICK, "RSTICK": S_RCLICK,
+    "HOME": S_HOME, "CAPTURE": S_CAPTURE, "NONE": 0,
+}
+# By label: pressing "A" on the Xbox pad presses "A" on the Switch.
+# (To map by position instead: multiput --remap A=B B=A X=Y Y=X)
+DEFAULT_MAP = {
+    "A": "A", "B": "B", "X": "X", "Y": "Y", "LB": "L", "RB": "R", "LT": "ZL", "RT": "ZR",
+    "VIEW": "MINUS", "MENU": "PLUS", "LS": "LSTICK", "RS": "RSTICK", "XBOX": "HOME",
+}
+
+# Hold any one of these combos for PAUSE_HOLD_S to stop (or resume) sending input to the
+# Switch. Changeable with `multiput --remap PAUSE=VIEW+MENU,XBOX` (alternatives separated
+# by commas, buttons of a combo joined by '+'; NONE turns pausing off).
+DEFAULT_PAUSE = (("VIEW", "MENU"),)
+PAUSE_HOLD_S = 1.0
+
+# (up, right, down, left) -> HID hat value; 8 = centered
+HAT = {
+    (1, 0, 0, 0): 0, (1, 1, 0, 0): 1, (0, 1, 0, 0): 2, (0, 1, 1, 0): 3,
+    (0, 0, 1, 0): 4, (0, 0, 1, 1): 5, (0, 0, 0, 1): 6, (1, 0, 0, 1): 7,
+}
+
+class XINPUT_GAMEPAD(ctypes.Structure):
+    _fields_ = [("wButtons", ctypes.c_ushort), ("bLeftTrigger", ctypes.c_ubyte),
+                ("bRightTrigger", ctypes.c_ubyte), ("sThumbLX", ctypes.c_short),
+                ("sThumbLY", ctypes.c_short), ("sThumbRX", ctypes.c_short),
+                ("sThumbRY", ctypes.c_short)]
+
+class XINPUT_STATE(ctypes.Structure):
+    # dwPaddingReserved: XInputGetStateEx (ordinal 100) writes 4 bytes more than the
+    # documented XINPUT_STATE. Plain XInputGetState just leaves it untouched.
+    _fields_ = [("dwPacketNumber", ctypes.c_uint), ("Gamepad", XINPUT_GAMEPAD),
+                ("dwPaddingReserved", ctypes.c_uint)]
+
+def load_xinput():
+    """Return a get_state(index, state_ptr) function, preferring the variant that reports Guide."""
+    try:
+        dll = ctypes.WinDLL("xinput1_4")
+        try:
+            return dll[100]  # XInputGetStateEx (undocumented ordinal): includes the Guide button
+        except AttributeError:
+            return dll.XInputGetState
+    except OSError:
+        return ctypes.WinDLL("xinput9_1_0").XInputGetState
+
+def axis(v, invert=False):
+    """XInput -32768..32767 -> HID 0..255 (128 = center)."""
+    b = (v + 32768) >> 8
+    return 255 - b if invert else b
+
+def button_names(overrides):
+    """DEFAULT_MAP with the user's overrides applied: {xbox name: switch name}.
+    Names are case-insensitive; unknown ones raise ValueError."""
+    names = dict(DEFAULT_MAP)
+    for xbox, switch in overrides.items():
+        xbox, switch = xbox.upper(), switch.upper()
+        if xbox not in XBOX_BUTTONS:
+            raise ValueError(f"unknown Xbox button {xbox!r}; use one of: {' '.join(XBOX_BUTTONS)}")
+        if switch not in SWITCH_BUTTONS:
+            raise ValueError(f"unknown Switch button {switch!r}; use one of: {' '.join(SWITCH_BUTTONS)}")
+        names[xbox] = switch
+    return names
+
+
+def button_map(overrides):
+    """{xbox name: switch button bit} for build_report."""
+    return {xbox: SWITCH_BUTTONS[switch] for xbox, switch in button_names(overrides).items()}
+
+
+def pressed(g):
+    """Names of the Xbox buttons currently held (d-pad not included)."""
+    down = {name for name, bit in XBOX_BUTTONS.items() if bit and g.wButtons & bit}
+    if g.bLeftTrigger > TRIGGER_THRESHOLD:
+        down.add("LT")
+    if g.bRightTrigger > TRIGGER_THRESHOLD:
+        down.add("RT")
+    return down
+
+
+def parse_pause(text):
+    """"VIEW+MENU,XBOX" -> (("VIEW", "MENU"), ("XBOX",)); "NONE" -> () (pausing off).
+    Raises ValueError."""
+    if text.strip().upper() == "NONE":
+        return ()
+    combos = []
+    for alternative in text.split(","):
+        names = tuple(dict.fromkeys(n.strip().upper() for n in alternative.split("+") if n.strip()))
+        if not names or any(n not in XBOX_BUTTONS for n in names):
+            raise ValueError(f"PAUSE needs combos of Xbox button names joined by '+', separated by ',' "
+                             f"(e.g. VIEW+MENU,XBOX), or NONE; use: {' '.join(XBOX_BUTTONS)}")
+        if names not in combos:
+            combos.append(names)
+    return tuple(combos)
+
+
+def pause_from_settings(value):
+    """The saved "pause" value -> combos. Also reads the older single-combo form
+    (["VIEW", "MENU"]) written before alternatives existed."""
+    if value and all(isinstance(v, str) for v in value):
+        return (tuple(value),)
+    return tuple(tuple(c) for c in value)
+
+
+def describe_pause(combos):
+    if not combos:
+        return "off"
+    return f"hold {' or '.join(' + '.join(c) for c in combos)} for {PAUSE_HOLD_S:g} s"
+
+
+class PauseToggle:
+    """Flips `paused` each time any of `combos` is held for PAUSE_HOLD_S (once per hold).
+    No combos: never toggles."""
+
+    def __init__(self, combos=DEFAULT_PAUSE):
+        self.combos = tuple(frozenset(c) for c in combos if c)
+        self.paused, self.since, self.fired = False, None, False
+
+    def held(self, down):
+        return any(c <= down for c in self.combos)
+
+    def held_buttons(self, down):
+        """Buttons of the combos currently held; kept off the Switch while held."""
+        return frozenset().union(*(c for c in self.combos if c <= down))
+
+    def update(self, down, now):
+        """Feed the held buttons every poll; returns True when `paused` just changed."""
+        if not self.held(down):
+            self.since, self.fired = None, False
+            return False
+        if self.since is None:
+            self.since = now
+        if not self.fired and now - self.since >= PAUSE_HOLD_S:
+            self.fired, self.paused = True, not self.paused
+            return True
+        return False
+
+
+NEUTRAL_REPORT = struct.pack("<HBBBBBB", 0, 8, 128, 128, 128, 128, 0)  # nothing pressed
+
+
+def build_report(g, mapping=None, ignore=()):
+    """XINPUT_GAMEPAD -> 8-byte HORIPAD HID report. mapping comes from button_map();
+    buttons named in `ignore` are left out (the pause combo while it's held)."""
+    mapping = mapping or button_map({})
+    buttons = 0
+    for name in pressed(g) - set(ignore):
+        buttons |= mapping[name]
+    w = g.wButtons
+    hat = HAT.get((bool(w & X_UP), bool(w & X_RIGHT), bool(w & X_DOWN), bool(w & X_LEFT)), 8)
+    # HID Y axis grows downward; XInput Y grows upward.
+    return struct.pack("<HBBBBBB", buttons, hat,
+                       axis(g.sThumbLX), axis(g.sThumbLY, True),
+                       axis(g.sThumbRX), axis(g.sThumbRY, True), 0)
