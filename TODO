@@ -16,7 +16,6 @@
 * CLAUDE.md file
 
 Ease of use
-* Firmware version check: Pico reports its version, multiput says "your Pico needs updating" (we already hit stale bundled firmware once)
 * Start with Windows, or start automatically when the controller connects
 * Auto-pick the first connected controller instead of always XInput slot 0
 * Code signing (removes the "Windows protected your PC" warning and most antivirus false alarms)

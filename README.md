@@ -96,6 +96,8 @@ Controller connected.
 ```
 **Pause the Switch side:** hold **View + Menu** for 1 second (or any of the combos you chose; see [Mapping](#mapping)). multiput beeps (low tone), and the Switch sees no buttons pressed until you hold a pause combo again (high tone). Your PC game keeps working the whole time, because it reads the controller directly. While a combo is held, its buttons aren't sent to the Switch, so View + Menu doesn't press − and + there.
 
+**Firmware version:** when it connects, multiput shows the Pico's firmware version, and tells you if it's older than multiput, so you know to run **multiput setup** again.
+
 **Change the mapping without restarting:** press **M** in the multiput window (see [Mapping](#mapping)).
 
 Close the window to stop. You can start multiput before the Pico is plugged in. It shows `Looking for the Pico at multiput.local...` or `Waiting for the Pico...` until it finds it.

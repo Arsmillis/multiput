@@ -63,7 +63,7 @@ def deliver(link):
     link.out.clear()
     res = ask("feed " + data.hex()) if data else "-"
     for tok in res.split():
-        if tok.startswith("S:"):
+        if tok.startswith(("S:", "V:")):
             link.inbox += bytes.fromhex(tok[2:])
     return [bytes.fromhex(t[2:]) for t in res.split() if t.startswith("A:")]
 
@@ -162,7 +162,8 @@ t = 100.0
 s4.poll(t)
 deliver(link4)
 s4.poll(t + 0.1)
-assert s4.ready
+assert s4.ready and link4.out == [protocol.VERSION_MAGIC]  # asked once per Pico session
+deliver(link4)
 for i in range(1, 10):  # 9 s of healthy link: periodic HELLO answered, no reconnects
     t_i = t + i
     s4.poll(t_i)
@@ -270,4 +271,61 @@ assert links.match_bt_port(PAIRED, PORTS[:1]) is None         # paired, but its 
 assert links.match_bt_port({}, []) is None
 assert links.find_bt_port() is None                          # off Windows: no registry, just None
 print("bluetooth port detection ok")
+
+# Firmware version check: asked once per Pico session, answered by firmware >= 0.2.0.
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import version  # noqa: E402
+
+def session_with(fw, r1, r2):
+    ask(f"fwversion {fw}")
+    ask(f"init {key.hex()} 0 {r1} {r2}")
+    link, out = FakeLink(), io.StringIO()
+    sess = protocol.Session(link, key)
+    with contextlib.redirect_stdout(out):
+        sess.poll(200.0)
+        deliver(link)      # HELLO -> SYNC
+        sess.poll(200.1)   # session starts; VERSION requested
+        deliver(link)      # VERSION -> reply (if the firmware answers)
+        sess.poll(200.2)
+    return sess, link, out
+
+sess, link, out = session_with(version.VERSION, 41, 42)
+assert sess.firmware_version == version.VERSION and "(up to date)" in out.getvalue()
+sess, link, out = session_with("0.0.1", 43, 44)
+assert "is older than this multiput" in out.getvalue()
+# Firmware 0.1.0 never answers: give up after VERSION_TIMEOUT_S, say so once.
+sess, link, out = session_with("-", 45, 46)
+with contextlib.redirect_stdout(out):
+    sess.poll(200.1 + protocol.VERSION_TIMEOUT_S)
+    sess.poll(205.0)
+assert sess.firmware_version is None and out.getvalue().count("0.1.0 or older") == 1
+# A reconnect to the same Pico doesn't ask again; a restarted Pico (new nonce) does.
+asked = lambda: sum(1 for d in link.out if d == protocol.VERSION_MAGIC)
+link.out.clear()
+with contextlib.redirect_stdout(io.StringIO()):
+    sess.nonce = None                     # what a link timeout does
+    sess.poll(206.0); deliver(link); sess.poll(206.1)
+    assert asked() == 0
+    ask(f"init {key.hex()} 0 47 48")      # Pico rebooted (maybe re-flashed)
+    ask("fwversion 9.9.9")
+    sess.send(b"\0" * 8); deliver(link)   # rejected -> SYNC with the new nonce
+    sess.poll(206.2)
+    assert asked() == 1
+    deliver(link); sess.poll(206.3)
+assert sess.firmware_version == "9.9.9"
+# Over Bluetooth the reply can arrive split up and next to a SYNC; an unasked reply is ignored.
+reply = b"MV\x050.2.0"
+s6 = protocol.Session(FakeLink(), key)
+s6.version_asked, s6.version_nonce, s6.nonce = 300.0, b"x" * 8, b"x" * 8
+with contextlib.redirect_stdout(io.StringIO()):
+    s6.link.inbox = reply[:4]; s6.poll(300.1)
+    assert s6.firmware_version is None
+    s6.link.inbox = reply[4:] + protocol.SYNC_MAGIC + b"x" * 8 + bytes(8); s6.poll(300.2)
+assert s6.firmware_version == "0.2.0"
+s7 = protocol.Session(FakeLink(), key)
+s7.link.inbox = reply
+s7.poll(0.0)
+assert s7.firmware_version is None
+print("firmware version check ok")
 print("ALL OK")

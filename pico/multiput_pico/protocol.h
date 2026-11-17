@@ -8,6 +8,8 @@
 //   SYNC      Pico -> PC  "MN" nonce[8] last_counter[8]                    (18 bytes)
 //   SIGNED    PC -> Pico  "MS" counter[8] report[8] mac[16]                (34 bytes)
 //   UNSIGNED  PC -> Pico  "MI" report[8]   (only if unsigned is allowed)   (10 bytes)
+//   VERSION?  PC -> Pico  "MV"
+//   VERSION   Pico -> PC  "MV" length[1] version[length]  (e.g. "0.2.0"; firmware 0.1.0 never answers)
 //
 // mac = first 16 bytes of HMAC-SHA256(key, nonce || "MS" || counter || report).
 // The nonce is random per Pico boot, so packets recorded in an earlier session are
@@ -41,7 +43,10 @@ struct Frame {
   size_t used;    // bytes consumed; 0 = need more data
   bool accepted;  // g_report was updated
   bool wantSync;  // caller should send a SYNC frame back
+  bool wantVersion;  // caller should send a VERSION frame back
 };
+
+static const size_t VERSION_MAX = 32;
 
 static br_hmac_key_context g_hmacKey;
 static bool g_allowUnsigned = false;
@@ -78,13 +83,17 @@ static bool mac_ok(const uint8_t *frame) {
 // Parses one frame at the start of buf. Works for single datagrams and byte streams
 // (on garbage it consumes 1 byte so a stream re-synchronises).
 static Frame parse_frame(const uint8_t *b, size_t n) {
-  Frame f = {0, false, false};
+  Frame f = {0, false, false, false};
   if (n < 2) return f;
   if (b[0] != 'M') { f.used = 1; return f; }
   switch (b[1]) {
     case 'H':
       f.used = 2;
       f.wantSync = true;
+      return f;
+    case 'V':  // informational and unsigned, like SYNC: a forged reply can only mislead a message
+      f.used = 2;
+      f.wantVersion = true;
       return f;
     case 'S': {
       if (n < SIGNED_LEN) return f;
@@ -109,6 +118,17 @@ static Frame parse_frame(const uint8_t *b, size_t n) {
       f.used = 1;
       return f;
   }
+}
+
+// VERSION frame into out (at least 3 + VERSION_MAX bytes); returns its length.
+static size_t build_version(uint8_t *out, const char *version) {
+  size_t n = strlen(version);
+  if (n > VERSION_MAX) n = VERSION_MAX;
+  out[0] = 'M';
+  out[1] = 'V';
+  out[2] = (uint8_t)n;
+  memcpy(out + 3, version, n);
+  return 3 + n;
 }
 
 static void build_sync(uint8_t out[SYNC_LEN]) {

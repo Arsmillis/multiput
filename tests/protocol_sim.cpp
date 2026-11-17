@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Arsmillis (https://github.com/Arsmillis/multiput)
 // Desktop build of the Pico protocol code, driven by tests/test_protocol.py over stdin:
 //   "init <keyhex> <allowUnsigned> <r1> <r2>" | "feed <hex>" (appended to a byte stream)
+//   "fwversion <x.y.z | ->" (what VERSION requests are answered with; "-" = never answer, like 0.1.0)
 #include <cstdio>
 #include <iostream>
 #include <string>
@@ -22,7 +23,7 @@ static string hex(const uint8_t *p, size_t n) {
 }
 
 int main() {
-  string cmd;
+  string cmd, fwversion = "-";
   vector<uint8_t> stream;
   while (cin >> cmd) {
     if (cmd == "init") {
@@ -32,6 +33,9 @@ int main() {
       cin >> k >> allow >> r1 >> r2;
       protocol_init(unhex(k).data(), allow, r1, r2);
       stream.clear();
+      cout << "ok\n";
+    } else if (cmd == "fwversion") {
+      cin >> fwversion;
       cout << "ok\n";
     } else if (cmd == "feed") {
       string h;
@@ -46,6 +50,11 @@ int main() {
         off += f.used;
         if (f.accepted) out += "A:" + hex((uint8_t *)&g_report, 8) + " ";
         if (f.wantSync) { uint8_t s[SYNC_LEN]; build_sync(s); out += "S:" + hex(s, SYNC_LEN) + " "; }
+        if (f.wantVersion && fwversion != "-") {
+          uint8_t v[3 + VERSION_MAX];
+          size_t n = build_version(v, fwversion.c_str());
+          out += "V:" + hex(v, n) + " ";
+        }
       }
       stream.erase(stream.begin(), stream.begin() + off);
       cout << (out.empty() ? "-" : out) << "\n";

@@ -4,6 +4,10 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-16
+- `tools/release.sh` to publish or republish a GitHub release (with `--dry-run`).
+- The Pico firmware reports its version, and multiput says when the firmware is older (or newer) than itself. Firmware 0.1.0 can't report one, so multiput suggests updating it.
+
 ## [0.1.0] - 2026-11-16
 First release.
 

@@ -22,6 +22,15 @@
 #error "Set Tools > IP/Bluetooth Stack to \"IPv4 + Bluetooth\": this firmware uses both Wi-Fi and Bluetooth"
 #endif
 
+// Set from the VERSION file by tools/build_firmware.sh (e.g. -DMULTIPUT_VERSION=0.2.0;
+// a version like 0.2.0 is a single preprocessor token, so it needs no quoting).
+#ifndef MULTIPUT_VERSION
+#define MULTIPUT_VERSION dev
+#endif
+#define MP_STR2(x) #x
+#define MP_STR(x) MP_STR2(x)
+static const char FIRMWARE_VERSION[] = MP_STR(MULTIPUT_VERSION);
+
 const uint32_t TIMEOUT_MS = 250;       // no valid packet this long -> release all inputs
 const uint32_t SYNC_INTERVAL_MS = 100; // rate limit for SYNC replies
 const uint32_t IN_USE_MS = 2000;       // a link is "in use" while signed input arrived within this
@@ -78,11 +87,11 @@ size_t handleFrame(const uint8_t *buf, size_t len, Link link) {
     lastPacketMs = lastSignedMs[link] = millis();
     everSigned[link] = true;
   }
-  if (f.wantSync && millis() - lastSyncMs >= SYNC_INTERVAL_MS) {
-    uint8_t sync[SYNC_LEN];
-    build_sync(sync);
-    if (link == LINK_WIFI) wifiReply(sync, SYNC_LEN);
-    else btReply(sync, SYNC_LEN);
+  if ((f.wantSync || f.wantVersion) && millis() - lastSyncMs >= SYNC_INTERVAL_MS) {
+    uint8_t reply[3 + VERSION_MAX];
+    size_t len = f.wantSync ? (build_sync(reply), SYNC_LEN) : build_version(reply, FIRMWARE_VERSION);
+    if (link == LINK_WIFI) wifiReply(reply, len);
+    else btReply(reply, len);
     lastSyncMs = millis();
   }
   return f.used;

@@ -278,5 +278,12 @@ import re  # noqa: E402
 import version  # noqa: E402
 assert re.fullmatch(r"\d+\.\d+\.\d+", (ROOT / "VERSION").read_text().strip()), "VERSION must be X.Y.Z"
 assert version.VERSION == (ROOT / "VERSION").read_text().strip() and version.VERSION in version.BANNER
+assert version.parse("0.10.2") == (0, 10, 2) and version.parse("dev") is None and version.parse("1.2") is None
+assert version.parse("0.10.0") > version.parse("0.9.9")   # compared as numbers, not text
+assert "(up to date)" in version.firmware_message("1.2.3", "1.2.3")
+assert "older than" in version.firmware_message("0.9.9", "0.10.0")
+assert "newer than" in version.firmware_message("0.10.0", "0.9.9")
+assert "development build" in version.firmware_message("dev", "0.1.0")
+assert "0.1.0 or older" in version.firmware_message(None, "0.2.0")
 print("version ok")
 print("ALL OK")

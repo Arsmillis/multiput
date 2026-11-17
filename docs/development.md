@@ -36,13 +36,16 @@ multiput/
 │   ├── build.bat           one-step build: firmware + tests (via WSL), then the installer
 │   ├── build_installer.bat builds multiput.exe and the installer (Windows)
 │   ├── run_tests.sh        runs all the test files (WSL/Linux)
+│   ├── release.sh          publishes or republishes the GitHub release for VERSION (WSL, gh)
+│   ├── release_notes.py    release notes from CHANGELOG.md, with checksums
 │   └── multiput.iss        Inno Setup installer definition
 ├── tests/
 │   ├── test_protocol.py    PC protocol + links against the Pico's protocol.h compiled for the desktop
 │   ├── protocol_sim.cpp    that desktop build of protocol.h
 │   ├── test_setup.py       .uf2 settings patching and the --setup flow
 │   ├── test_controller.py  button mapping, --remap, pause combos, M-key editing
-│   └── test_perf.py        the performance test's measuring logic, against a fake Pico
+│   ├── test_perf.py        the performance test's measuring logic, against a fake Pico
+│   └── test_release.py     release notes generation
 └── build/                  everything generated (git-ignored)
 ```
 
@@ -111,13 +114,22 @@ multiput uses [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, s
 - `multiput --version` and the startup banner, through `pc/version.py`. The file is bundled into `multiput.exe`.
 - the installer's version and file name (`multiput-setup-<version>.exe`), passed to Inno Setup by `tools/build_installer.bat`.
 
-The firmware doesn't carry the version yet; that comes with the firmware version check in `TODO`.
+- the firmware: `tools/build_firmware.sh` compiles it in (`-DMULTIPUT_VERSION=X.Y.Z`; a version like `0.2.0` is a single preprocessor token, so it needs no quoting). The Pico reports it when asked (a `VERSION` request; see `protocol.h`), and multiput compares it with its own version once per Pico session. Firmware 0.1.0 predates this and never answers, so multiput says it's "0.1.0 or older". Builds from the Arduino IDE report `dev`.
 
 **Releasing:**
-1. Move the `CHANGELOG.md` entries from "Unreleased" under a new `## [X.Y.Z] - YYYY-MM-DD` heading, and set `VERSION` to `X.Y.Z`.
-2. Run `tools\build.bat`, which builds and tests everything.
-3. Commit, tag `vX.Y.Z`, and push the tag.
-4. Create a GitHub release from the tag and attach `build\installer\multiput-setup-X.Y.Z.exe` and `build\firmware\multiput.uf2`.
+1. Move the `CHANGELOG.md` entries from "Unreleased" under a new `## [X.Y.Z] - YYYY-MM-DD` heading, set `VERSION` to `X.Y.Z`, then commit and push to `main`.
+2. In WSL, run `tools/release.sh`. It needs the GitHub CLI (`gh`), signed in with push access. It:
+   - checks that `VERSION` and the changelog agree, nothing is uncommitted, and `main` matches GitHub;
+   - builds and tests everything with `tools\build.bat`;
+   - tags `vX.Y.Z` and pushes the tag;
+   - creates the GitHub release with notes from the changelog and SHA-256 checksums;
+   - attaches the installer and `multiput.uf2`, then downloads them back to check them.
+
+**Releases only come from `main`:** a real run refuses to start on any other branch, or on a detached HEAD such as a checked-out tag, and names where you are. Just before tagging and publishing, after the build, it checks again that you're still on `main` at the same commit. The commit must also be the current tip of `origin/main`.
+
+`tools/release.sh --dry-run` does the build and writes `build/release-notes.md`, without changing anything on GitHub. It works on any branch, with a note that a real release needs `main`.
+
+**Republishing** (for example after a broken upload, or to fix the notes): run `tools/release.sh` again on the same commit. It rebuilds, replaces the files and notes on the existing release, and leaves the tag alone. If the tag already points at a different commit, the script refuses: a published version shouldn't change contents, so bump `VERSION` and release that instead.
 
 ## Tests (WSL/Linux; need Python 3, gcc/g++, and the rp2040 core)
 `tools/run_tests.sh` runs them all:
@@ -125,3 +137,4 @@ The firmware doesn't carry the version yet; that comes with the firmware version
 - `python3 tests/test_setup.py`: settings patching (including the built `.uf2` files) and the `--setup` flow.
 - `python3 tests/test_controller.py`: button mapping, `--remap`, pause combos, and M-key editing.
 - `python3 tests/test_perf.py`: the performance test's measuring logic, against a fake Pico.
+- `python3 tests/test_release.py`: release notes generation.

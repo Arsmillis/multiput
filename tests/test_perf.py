@@ -26,7 +26,7 @@ class FakePico:
             self.hellos += 1
             if self.answer(self.hellos):
                 self.inbox += protocol.SYNC_MAGIC + self.nonce + struct.pack("<Q", 0)
-        else:
+        elif data != protocol.VERSION_MAGIC:  # the session also asks the firmware version once
             self.signed.append(data)
 
     def recv(self):

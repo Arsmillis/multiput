@@ -37,9 +37,11 @@ LOGS="$ROOT/build/logs"  # full compiler output, one file per build
 mkdir -p "$OUT" "$LOGS"
 FQBN=rp2040:rp2040:rpipicow:usbstack=tinyusb
 
-echo "== firmware"
 LOG="$LOGS/firmware.log"
+VERSION=$(tr -d '[:space:]' < "$ROOT/VERSION")
+echo "== firmware $VERSION"
 if ! "$CLI" compile --fqbn "$FQBN,ipbtstack=ipv4btcble" --warnings all --output-dir "$WORK/out" \
+     --build-property "compiler.cpp.extra_flags=-DMULTIPUT_VERSION=$VERSION" \
      "$ROOT/pico/multiput_pico" >"$LOG" 2>&1; then
   grep -E "error" "$LOG" | head -20
   echo "Full compiler output: build/logs/firmware.log"

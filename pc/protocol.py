@@ -12,14 +12,18 @@ import hmac
 import struct
 import time
 
+from version import firmware_message
+
 HELLO = b"MH"
 SYNC_MAGIC, SYNC_LEN = b"MN", 18   # + nonce[8] + last_counter[8]
 SIGNED_MAGIC = b"MS"               # + counter[8] + report[8] + mac[16]
 UNSIGNED_MAGIC = b"MI"             # + report[8]
+VERSION_MAGIC = b"MV"              # PC -> Pico: request; Pico -> PC: + length[1] + version
 KEY_LEN, MAC_LEN = 32, 16
 
 HELLO_RETRY_S = 0.5     # how often to ask the Pico for a session until it answers
 HELLO_ALIVE_S = 1.0     # once connected: a HELLO this often; the Pico's SYNC reply shows it's still there
+VERSION_TIMEOUT_S = 2.0  # no VERSION reply by then: firmware 0.1.0 or older (it can't answer)
 LINK_TIMEOUT_S = 4.0    # no SYNC for this long -> reconnect the link (new IP, dropped Bluetooth)
 
 def sign_packet(key, nonce, counter, report):
@@ -35,6 +39,9 @@ class Session:
         self.nonce, self.counter = None, 0
         self.rx, self.last_hello = b"", None
         self.last_heard = None  # when the Pico last sent a SYNC
+        self.firmware_version = None  # reported by the Pico; None until it answers (or never, for 0.1.0)
+        self.version_asked = None     # when VERSION was requested (-1: answered or given up)
+        self.version_nonce = None     # the Pico session it was requested for
         self.lost = False
 
     @property
@@ -46,6 +53,16 @@ class Session:
             self.last_heard = now
         self.rx += self.link.recv()
         while len(self.rx) >= 2:
+            if self.rx[:2] == VERSION_MAGIC:
+                if len(self.rx) < 3 or len(self.rx) < 3 + self.rx[2]:
+                    break
+                version = self.rx[3:3 + self.rx[2]].decode(errors="replace")
+                self.rx = self.rx[3 + self.rx[2]:]
+                if self.version_asked is not None and self.firmware_version is None:
+                    self.firmware_version = version
+                    self.version_asked = -1  # answered
+                    print(firmware_message(version))
+                continue
             if self.rx[:2] != SYNC_MAGIC:
                 self.rx = self.rx[1:]
                 continue
@@ -62,10 +79,17 @@ class Session:
                     print("Pico restarted; new session.")
                 elif self.counter == 0:
                     print("Pico session started.")
+                if nonce != self.version_nonce:
+                    # a new Pico session: first connection, or it restarted (maybe re-flashed)
+                    self.link.send(VERSION_MAGIC)
+                    self.firmware_version, self.version_asked, self.version_nonce = None, now, nonce
                 self.nonce, self.counter = nonce, last
             else:
                 self.counter = max(self.counter, last)
 
+        if self.version_asked not in (None, -1) and now - self.version_asked >= VERSION_TIMEOUT_S:
+            self.version_asked = -1  # gave up: firmware too old to answer
+            print(firmware_message(None))
         if now - self.last_heard >= LINK_TIMEOUT_S:
             if self.nonce is not None and not self.lost:  # only after having been connected
                 print("Lost contact with the Pico; reconnecting... (inputs on the Switch are released meanwhile)")
