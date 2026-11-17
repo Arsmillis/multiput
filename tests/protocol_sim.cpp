@@ -6,6 +6,8 @@
 //   "time <ms>" (the clock ota.h sees) | "storagefail <0|1>" | "otastate" (what the fake storage got)
 //   "choose <builtin> <saved> <savedFrom>" -> settings.h's choose_settings(); builtin and savedFrom are
 //     blank|A|B (built-in blocks), saved is none|garbage|X (X: a configured settings file)
+//   "blank <hex>" -> ota.h's bytes_blank(): 1 if all 0x00 or all 0xFF
+//   "keystore <hex> <bankStart 0|1>" -> ota.h's keystore_chunk_empty()
 #include <cstdio>
 #include <iostream>
 #include <string>
@@ -65,6 +67,17 @@ int main() {
       cout << "size=" << simSize << " written=" << simImage.size() << " finished=" << simFinished
            << " aborts=" << simAborts << " restarts=" << simRestarts << " wifi=" << (simSsid.empty() ? "<off>" : simSsid)
            << "/" << (simPass.empty() ? "<none>" : simPass) << " image=" << hex(simImage.data(), simImage.size()) << "\n";
+    } else if (cmd == "blank") {
+      string h;
+      cin >> h;
+      auto b = unhex(h);
+      cout << bytes_blank(b.data(), b.size()) << "\n";
+    } else if (cmd == "keystore") {
+      string h;
+      int start;
+      cin >> h >> start;
+      auto b = unhex(h);
+      cout << keystore_chunk_empty(b.data(), b.size(), start) << "\n";
     } else if (cmd == "choose") {
       string b, s, from;
       cin >> b >> s >> from;
@@ -98,6 +111,7 @@ int main() {
         if (f.accepted) out += "A:" + hex((uint8_t *)&g_report, 8) + " ";
         if (f.wantSync) { uint8_t s[SYNC_LEN]; build_sync(s); out += "S:" + hex(s, SYNC_LEN) + " "; }
         if (f.replyLen) out += "R:" + hex(f.reply, f.replyLen) + " ";
+        if (f.wantStatus) out += "G:" + hex((const uint8_t *)"MG\x03sim", 6) + " ";
         if (f.wantVersion && fwversion != "-") {
           uint8_t v[3 + VERSION_MAX];
           size_t n = build_version(v, fwversion.c_str());

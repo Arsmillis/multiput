@@ -46,6 +46,10 @@ Settings settings;  // the settings in use, loaded in setup() (see choose_settin
 uint32_t builtinHash = 0;
 uint32_t restartAtMs = 0;
 static const char *SETTINGS_FILE = "/settings.bin";
+static const char *BT_KEYS_FILE = "/btkeys.bin";  // pairing keys saved across an update
+static const char *BT_KEYS_LOG = "/btkeys.log";   // what happened to them last (for `multiput --pico-status`)
+char keysLastSave[40] = "none", keysLastRestore[40] = "none";
+uint32_t lastStatusMs = 0;
 
 // HORI HORIPAD S report descriptor (a Switch-compatible wired controller).
 static const uint8_t desc_hid_report[] = {
@@ -102,6 +106,19 @@ size_t handleFrame(const uint8_t *buf, size_t len, Link link) {
     if (link == LINK_WIFI) wifiReply(sync, SYNC_LEN);
     else btReply(sync, SYNC_LEN);
     lastSyncMs = millis();
+  } else if (f.wantStatus && millis() - lastStatusMs >= SYNC_INTERVAL_MS) {
+    uint8_t reply[3 + 128];
+    char text[128];
+    int n = snprintf(text, sizeof text, "fw=%s; bt keys=%s; last save=%s; last restore=%s", FIRMWARE_VERSION,
+                     btKeysPresent() ? "present" : "none", keysLastSave, keysLastRestore);
+    n = n < 0 ? 0 : (n >= (int)sizeof text ? (int)sizeof text - 1 : n);
+    reply[0] = 'M';
+    reply[1] = 'G';
+    reply[2] = (uint8_t)n;
+    memcpy(reply + 3, text, n);
+    if (link == LINK_WIFI) wifiReply(reply, 3 + n);
+    else btReply(reply, 3 + n);
+    lastStatusMs = millis();
   } else if (f.wantVersion && millis() - lastVersionMs >= SYNC_INTERVAL_MS) {
     // Its own rate limit: the PC asks right after a SYNC, which must not block the answer.
     uint8_t reply[3 + VERSION_MAX];
@@ -167,11 +184,97 @@ void loadSettings() {
   settings.pass[sizeof settings.pass - 1] = '\0';
 }
 
+// Bluetooth pairing keys live inside the firmware image (an arduino-pico core detail), so
+// installing new firmware wipes them and Windows would have to re-pair, which takes about
+// a minute. saveBtKeys() copies them to storage just before an update is installed;
+// restoreBtKeys() writes them back on the new firmware's first boot.
+void writeKeysLog() {
+  File f = LittleFS.open(BT_KEYS_LOG, "w");
+  if (!f) return;
+  f.printf("%s\n%s\n", keysLastSave, keysLastRestore);
+  f.close();
+}
+
+void readKeysLog() {
+  File f = LittleFS.open(BT_KEYS_LOG, "r");
+  if (!f) return;
+  String save = f.readStringUntil('\n'), restore = f.readStringUntil('\n');
+  f.close();
+  strncpy(keysLastSave, save.c_str(), sizeof keysLastSave - 1);
+  strncpy(keysLastRestore, restore.c_str(), sizeof keysLastRestore - 1);
+}
+
+// Does the key store hold any pairing keys right now? (for the status report)
+bool btKeysPresent() {
+  uint8_t buf[256];
+  uint32_t size = btKeysBankSize();
+  for (int bank = 0; bank < BT_KEY_BANKS; bank++)
+    for (uint32_t off = 0; off < size; off += sizeof buf) {
+      btKeysRead(bank, off, buf, sizeof buf);
+      if (!keystore_chunk_empty(buf, sizeof buf, off == 0)) return true;
+    }
+  return false;
+}
+
+void saveBtKeys() {
+  File f = LittleFS.open(BT_KEYS_FILE, "w");
+  if (!f) {  // not fatal: Windows just re-pairs
+    snprintf(keysLastSave, sizeof keysLastSave, "failed: can't open file");
+    writeKeysLog();
+    return;
+  }
+  uint8_t buf[256];
+  uint32_t size = btKeysBankSize(), written = 0;
+  for (int bank = 0; bank < BT_KEY_BANKS; bank++)
+    for (uint32_t off = 0; off < size; off += sizeof buf) {
+      btKeysRead(bank, off, buf, sizeof buf);
+      written += f.write(buf, sizeof buf);
+    }
+  f.close();
+  snprintf(keysLastSave, sizeof keysLastSave, "%s %lu B", written == BT_KEY_BANKS * size ? "saved" : "short write",
+           (unsigned long)written);
+  writeKeysLog();
+}
+
+// Returns true if it restored keys (the caller restarts, so the Bluetooth stack loads them).
+bool restoreBtKeys() {
+  File f = LittleFS.open(BT_KEYS_FILE, "r");
+  if (!f) return false;
+  uint8_t buf[256];
+  uint32_t size = btKeysBankSize();
+  bool sizeOk = f.size() == BT_KEY_BANKS * size;
+  bool blank = sizeOk;  // the key store holds no keys (blank, or just the header the stack wrote at boot)
+  for (int bank = 0; blank && bank < BT_KEY_BANKS; bank++)
+    for (uint32_t off = 0; blank && off < size; off += sizeof buf) {
+      btKeysRead(bank, off, buf, sizeof buf);
+      blank = keystore_chunk_empty(buf, sizeof buf, off == 0);
+    }
+  if (!sizeOk) snprintf(keysLastRestore, sizeof keysLastRestore, "discarded: saved size %lu", (unsigned long)f.size());
+  else if (!blank) snprintf(keysLastRestore, sizeof keysLastRestore, "kept: keys already present");
+  else snprintf(keysLastRestore, sizeof keysLastRestore, "restored %lu B", (unsigned long)(BT_KEY_BANKS * size));
+  if (blank) {  // a fresh image: put the saved keys back
+    for (int bank = 0; bank < BT_KEY_BANKS; bank++) {
+      btKeysErase(bank);
+      for (uint32_t off = 0; off < size; off += sizeof buf) {
+        f.read(buf, sizeof buf);
+        btKeysWrite(bank, off, buf, sizeof buf);
+      }
+    }
+  }
+  f.close();
+  LittleFS.remove(BT_KEYS_FILE);  // used once; keys already present are never overwritten
+  writeKeysLog();
+  return blank;
+}
+
 // Over-the-air update storage (ota.h): the core's Updater writes the image to
 // firmware.bin in LittleFS, and the OTA loader installs it on the next boot.
 bool otaBegin(uint32_t size) { return Update.begin(size); }
 bool otaWrite(const uint8_t *data, size_t len) { return Update.write((uint8_t *)data, len) == len; }
-bool otaFinish() { return Update.end(); }
+bool otaFinish() {
+  saveBtKeys();  // the new image wipes them; restoreBtKeys() puts them back on its first boot
+  return Update.end();
+}
 void otaAbort() { Update.end(false); }  // incomplete, so discarded rather than installed
 bool otaSaveWifi(const char *ssid, const char *pass) {
   Settings s = settings;
@@ -187,6 +290,10 @@ uint32_t otaNowMs() { return millis(); }
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   loadSettings();
+  readKeysLog();
+  // The Bluetooth stack already opened its key store before setup() (initVariant), so after
+  // restoring the keys, restart once for it to load them.
+  if (restoreBtKeys()) rp2040.reboot();
   protocol_init(settings.key, settings.flags & SETTINGS_ALLOW_UNSIGNED, rp2040.hwrand32(), rp2040.hwrand32());
   ota_init(settings.key);
   g_ota = {otaBegin, otaWrite, otaFinish, otaAbort, otaSaveWifi, otaRestartSoon, otaNowMs};

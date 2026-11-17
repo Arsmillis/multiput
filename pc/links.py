@@ -13,6 +13,9 @@ import time
 
 PORT = 41234
 RETRY_S = 2.0  # how often to retry reaching the Pico at startup
+# Receive buffer: larger than any UDP datagram. On Windows a datagram bigger than the buffer
+# raises WSAEMSGSIZE and is lost (Linux would truncate it instead).
+MAX_DATAGRAM = 65536
 
 def retry(connect, message):
     """Call connect() until it succeeds, so multiput can be started before the Pico is up."""
@@ -54,7 +57,7 @@ class UdpLink:
         out = b""
         while True:
             try:
-                data, src = self.sock.recvfrom(64)
+                data, src = self.sock.recvfrom(MAX_DATAGRAM)
             except OSError:  # nothing waiting (or Windows reporting an earlier unreachable send)
                 return out
             if src[0] == self.addr[0]:

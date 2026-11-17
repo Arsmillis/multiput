@@ -17,6 +17,7 @@ from protocol import MAC_LEN, Session
 from version import OTA_SINCE, VERSION, parse
 
 BEGIN, DATA, COMMIT, WIFI, REPLY = b"MU", b"MD", b"MC", b"MW", b"MR"
+STATUS = b"MG"  # diagnostics request/reply (protocol.h)
 REPLY_LEN = 7
 CHUNK = 512
 READY, INSTALLING, WIFI_SAVED = 0, 1, 2
@@ -32,10 +33,12 @@ DATA_TIMEOUT_S = 0.5
 DATA_RETRIES = 20
 CONNECT_TIMEOUT_S = 15.0
 RESTART_TIMEOUT_S = 45.0  # installing the image and booting again
-# Over Bluetooth, longer: a firmware change wipes the Pico's Bluetooth pairing keys (the
-# arduino-pico core keeps them inside the firmware image), so Windows' first reconnect fails
-# to authenticate and it re-pairs by itself, which took 74 s in testing.
+# Over Bluetooth, longer. Firmware older than 0.3.1 doesn't keep its Bluetooth pairing keys
+# across an update (the arduino-pico core keeps them inside the firmware image), so Windows'
+# first reconnect fails to authenticate and it re-pairs by itself (49-74 s in testing).
+# From 0.3.1 the Pico saves and restores them, but reopening the COM port can still be slow.
 BT_RESTART_TIMEOUT_S = 180.0
+KEEPS_BT_PAIRING = (0, 3, 1)
 
 
 class UpdateError(Exception):
@@ -133,6 +136,22 @@ def send_wifi(link, session, ssid, password):
     Transfer(link, session).expect(frame, WIFI_SAVED, 3.0, "changing the Wi-Fi network")
 
 
+def pico_status(link, timeout=2.0):
+    """The Pico's diagnostics text (firmware >= 0.3.1), or None if it doesn't answer."""
+    link.recv()  # drop anything still waiting
+    rx, deadline, next_ask = b"", time.monotonic() + timeout, 0.0
+    while time.monotonic() < deadline:
+        if time.monotonic() >= next_ask:  # re-ask: a reply can be lost
+            link.send(STATUS)
+            next_ask = time.monotonic() + 0.5
+        rx += link.recv()
+        at = rx.find(STATUS)
+        if at >= 0 and len(rx) >= at + 3 and len(rx) >= at + 3 + rx[at + 2]:
+            return rx[at + 3:at + 3 + rx[at + 2]].decode(errors="replace")
+        time.sleep(0.005)
+    return None
+
+
 def connect(link, key, timeout=CONNECT_TIMEOUT_S):
     """A ready Session whose firmware version check has finished, or None."""
     session, deadline = Session(link, key), time.monotonic() + timeout
@@ -185,7 +204,7 @@ def run_update(args, link, key, saved, store, cfg, firmware_dir, ask_wifi, ask=N
                 raise SystemExit(f"Update failed: {e}. The Pico keeps its current firmware.")
             print("\nFirmware sent and verified. The Pico is installing it and restarting...")
             over_bt = hasattr(link, "ser")  # links.SerialLink
-            if over_bt:
+            if over_bt and (parse(fw) or KEEPS_BT_PAIRING) < KEEPS_BT_PAIRING:
                 print("Over Bluetooth, Windows can take a minute or two to reconnect after a firmware update:\n"
                       "the update resets the Pico's Bluetooth pairing, and Windows re-pairs by itself.")
             time.sleep(3)

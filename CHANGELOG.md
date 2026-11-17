@@ -4,6 +4,14 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-16
+### Added
+- `multiput --pico-status` shows the Pico's firmware version and diagnostics, such as whether it holds Bluetooth pairing keys and what happened to them at the last update.
+
+### Fixed
+- Replies from the Pico over Wi‑Fi longer than 64 bytes were silently dropped on Windows. Until now, every reply fit in 64 bytes.
+- A firmware update no longer resets the Pico's Bluetooth pairing. The Pico saves its pairing keys before installing an update and restores them afterwards, so Windows reconnects straight away instead of re-pairing for about a minute. This takes effect for updates *from* 0.3.1 on: updating a 0.3.0 Pico to 0.3.1 still resets the pairing once.
+
 ## [0.3.0] - 2026-11-16
 ### Added
 - Over-the-air updates: `multiput --update` (Start menu: multiput update) installs new firmware and can change the Wi‑Fi network while the Pico stays in the dock, over Wi‑Fi or Bluetooth. Updates are signed with your key and checked as a whole before installing, Wi‑Fi details are encrypted, and a failed update leaves the current firmware running.

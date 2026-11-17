@@ -10,6 +10,8 @@
 //   UNSIGNED  PC -> Pico  "MI" report[8]   (only if unsigned is allowed)   (10 bytes)
 //   VERSION?  PC -> Pico  "MV"
 //   VERSION   Pico -> PC  "MV" length[1] version[length]  (e.g. "0.2.0"; firmware 0.1.0 never answers)
+//   STATUS?   PC -> Pico  "MG"
+//   STATUS    Pico -> PC  "MG" length[1] text[length]  (diagnostics, e.g. Bluetooth pairing keys; firmware >= 0.3.1)
 //   Over-the-air update frames (MU, MD, MC, MW, and the MR reply) are described in ota.h.
 //
 // mac = first 16 bytes of HMAC-SHA256(key, nonce || "MS" || counter || report).
@@ -45,6 +47,7 @@ struct Frame {
   bool accepted;  // g_report was updated
   bool wantSync;  // caller should send a SYNC frame back
   bool wantVersion;  // caller should send a VERSION frame back
+  bool wantStatus;   // caller should send a STATUS frame back
   uint8_t reply[7];  // or this reply (an ota.h REPLY frame), if replyLen > 0
   uint8_t replyLen;
 };
@@ -106,7 +109,7 @@ static bool ota_frame(const uint8_t *b, size_t n, Frame &f);  // ota.h
 // Parses one frame at the start of buf. Works for single datagrams and byte streams
 // (on garbage it consumes 1 byte so a stream re-synchronises).
 static Frame parse_frame(const uint8_t *b, size_t n) {
-  Frame f = {0, false, false, false, {0}, 0};
+  Frame f = {0, false, false, false, false, {0}, 0};
   if (n < 2) return f;
   if (b[0] != 'M') { f.used = 1; return f; }
   switch (b[1]) {
@@ -117,6 +120,10 @@ static Frame parse_frame(const uint8_t *b, size_t n) {
     case 'V':  // informational and unsigned, like SYNC: a forged reply can only mislead a message
       f.used = 2;
       f.wantVersion = true;
+      return f;
+    case 'G':  // diagnostics: informational and unsigned too; no secrets in the reply
+      f.used = 2;
+      f.wantStatus = true;
       return f;
     case 'S': {
       if (n < SIGNED_LEN) return f;

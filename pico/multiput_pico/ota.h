@@ -165,6 +165,30 @@ static void ota_commit(const uint8_t *b, Frame &f) {
   g_ota.restartSoon();
 }
 
+// Flash that holds nothing: freshly built (zeros) or erased (0xFF). Used to tell whether
+// new firmware's Bluetooth pairing-key area is still empty (see multiput_pico.ino).
+static bool bytes_blank(const uint8_t *p, size_t n) {
+  bool zeros = true, erased = true;
+  for (size_t i = 0; i < n; i++) {
+    zeros = zeros && p[i] == 0x00;
+    erased = erased && p[i] == 0xFF;
+  }
+  return zeros || erased;
+}
+
+// The Bluetooth stack's key store (BTstack TLV) starts each bank with an 8-byte header,
+// "BTstack" + an epoch byte. A bank holding no keys is blank, or has only that header:
+// the stack writes it at boot (before setup()) when it finds new firmware's blank area, so
+// the header alone must not count as "keys present". bankStart: p starts at a bank's offset 0.
+static const size_t KEYSTORE_HEADER = 8;
+static bool keystore_chunk_empty(const uint8_t *p, size_t n, bool bankStart) {
+  if (bankStart && n >= KEYSTORE_HEADER && memcmp(p, "BTstack", KEYSTORE_HEADER - 1) == 0) {
+    p += KEYSTORE_HEADER;
+    n -= KEYSTORE_HEADER;
+  }
+  return bytes_blank(p, n);
+}
+
 static bool nul_within(const uint8_t *p, size_t n) {
   return memchr(p, 0, n) != nullptr;
 }

@@ -228,6 +228,11 @@ assert links.match_bt_port({}, []) is None
 assert links.find_bt_port() is None                          # off Windows: no registry, just None
 print("bluetooth port detection ok")
 
+# UDP replies must fit the receive buffer (on Windows a bigger datagram is silently lost):
+# VERSION and STATUS replies carry a length byte, so up to 3 + 255 bytes.
+assert links.MAX_DATAGRAM >= 3 + 255
+print("udp receive buffer ok")
+
 # Firmware version check: asked once per Pico session, answered by firmware >= 0.2.0.
 import contextlib  # noqa: E402
 import io  # noqa: E402

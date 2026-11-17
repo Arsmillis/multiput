@@ -61,7 +61,7 @@ Things that must stay in sync across the two halves:
 **All changes go through a pull request into `main`. Don't push to `main` directly.**
 1. Work on a branch, e.g. `git switch -c fix/bt-reconnect`.
 2. Run `tools/run_tests.sh` (WSL). If you changed the firmware or the installer, run the full build with `tools\build.bat`.
-3. Add your change to the "Unreleased" section of `CHANGELOG.md`.
+3. Decide the version your change ships as, following the bump rules in [Versioning and releases](#versioning-and-releases). Set `VERSION` to it, and add your change to `CHANGELOG.md` under `## [X.Y.Z] - YYYY-MM-DD`. If that section doesn't exist yet, create it above the previous release; if another PR already bumped the version for the same release, add to its section. "Unreleased" is only for changes that won't trigger a release on their own.
 4. Push the branch and open a pull request into `main`. Merge it once it's reviewed and the tests pass.
 
 Releases are made from `main` after merging (see [Versioning and releases](#versioning-and-releases)).
@@ -88,6 +88,7 @@ Example: `multiput --setup --link wifi --ssid HomeNet --drive E:\`
 ## Overriding at run time
 - `multiput 192.168.1.50`: use this IP instead of the saved address, for networks that block `.local` names.
 - `multiput --update`: update the Pico's firmware (the bundled `firmware/multiput.bin`, or `--firmware FILE.bin`) and optionally its Wi‑Fi network (`--ssid`/`--password` skip the prompts), over the current link. It needs firmware 0.3.0 or newer on the Pico; older firmware gets a USB setup once. Protocol and safety details are in `pico/multiput_pico/ota.h`.
+- `multiput --pico-status`: show the Pico's firmware version and diagnostics text (firmware 0.3.1 and newer): whether it holds Bluetooth pairing keys, and the outcome of the last save before an update and the last restore after one. It's the unsigned `STATUS` request in `protocol.h`, and it contains no key material.
 - `multiput --perf-test`: measure the round trip over each link (see [Performance](performance.md)). It refuses to run alongside multiput; a named mutex (`Local\multiput`) stops two copies running at once.
 - `multiput --link wifi` / `--link bt`: switch link; remembered as the default. The Pico listens on both (see the README).
 - `multiput --bt COM5`: use Bluetooth on this port, skipping auto-detection. Without it, multiput finds the port of the paired device named `multiput`: Windows stores the device's Bluetooth address under `HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices`, and the outgoing COM port's hardware ID contains that address. It falls back to the saved port if that fails.
@@ -131,7 +132,7 @@ multiput uses [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, s
 - the firmware: `tools/build_firmware.sh` compiles it in (`-DMULTIPUT_VERSION=X.Y.Z`; a version like `0.2.0` is a single preprocessor token, so it needs no quoting). The Pico reports it when asked (a `VERSION` request; see `protocol.h`), and multiput compares it with its own version once per Pico session. Firmware 0.1.0 predates this and never answers, so multiput says it's "0.1.0 or older". Builds from the Arduino IDE report `dev`.
 
 **Releasing:**
-1. In a pull request, move the `CHANGELOG.md` entries from "Unreleased" under a new `## [X.Y.Z] - YYYY-MM-DD` heading and set `VERSION` to `X.Y.Z`. Merge it, then update your local `main` with `git switch main && git pull`.
+1. Merge the pull request. It already carries the `VERSION` bump and its `CHANGELOG.md` section (see [Contributing](#contributing)), so there's no separate release PR. Then update your local `main`: `git switch main && git pull`.
 2. In WSL, run `tools/release.sh`. It needs the GitHub CLI (`gh`), signed in with push access. It:
    - checks that `VERSION` and the changelog agree, nothing is uncommitted, and `main` matches GitHub;
    - builds and tests everything with `tools\build.bat`;

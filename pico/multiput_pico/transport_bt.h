@@ -11,6 +11,12 @@ void btBegin(const char *name);
 void btListen(bool on);  // accept connections and be discoverable, or neither
 int btRead();            // next byte, or -1 if none
 void btWrite(const uint8_t *data, size_t len);
+// Pairing keys: 2 banks of btKeysBankSize() bytes (see transport_bt_serial.cpp)
+static const int BT_KEY_BANKS = 2;
+uint32_t btKeysBankSize();
+void btKeysRead(int bank, uint32_t offset, uint8_t *buf, uint32_t len);
+void btKeysErase(int bank);
+void btKeysWrite(int bank, uint32_t offset, const uint8_t *buf, uint32_t len);
 
 static uint8_t rxBuf[640];  // must hold a whole frame: up to an over-the-air DATA frame (8 + 512 bytes)
 static size_t rxLen = 0;

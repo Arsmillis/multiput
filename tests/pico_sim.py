@@ -43,7 +43,7 @@ def ask(line):
     return _sim.stdout.readline().strip()
 
 
-REPLY_TOKENS = ("S:", "V:", "R:")  # SYNC, VERSION and update REPLY frames go back to the PC
+REPLY_TOKENS = ("S:", "V:", "R:", "G:")  # SYNC, VERSION, update REPLY and STATUS frames go back to the PC
 
 
 def feed(data):

@@ -181,6 +181,26 @@ for (b, s, src), want in cases.items():
     assert ask(f"choose {b} {s} {src}") == want, (b, s, src)
 print("settings choice ok")
 
+# Bluetooth pairing keys are restored after an update only into a blank key area (a fresh
+# image: zeros, or erased flash), never over keys the Pico already has.
+assert ask("blank " + "00" * 256) == "1" and ask("blank " + "ff" * 256) == "1"
+assert ask("blank " + "00" * 255 + "01") == "0" and ask("blank " + "ff" * 128 + "00" * 128) == "0"
+# What broke the first 0.3.1 build on hardware: before setup() the Bluetooth stack opens its
+# key store, finds the fresh image's blank area, and writes an 8-byte header ("BTstack" + epoch).
+# A bank holding only that header must still count as empty, or the saved keys are never restored.
+header = b"BTstack\x00".hex()
+assert ask(f"keystore {header}{'ff' * 248} 1") == "1"        # header only: no keys
+assert ask(f"keystore {header}{'ff' * 248} 0") == "0"        # not at a bank start: real data
+assert ask(f"keystore {header}0102{'ff' * 246} 1") == "0"    # header + an entry: keys present
+assert ask(f"keystore {'00' * 256} 0") == "1" and ask(f"keystore {'ff' * 256} 1") == "1"
+print("pairing-key blank check ok")
+
+# The Pico's diagnostics (multiput --pico-status).
+session, link = fresh_pico(180)
+assert updater.pico_status(link) == "sim"
+assert updater.pico_status(LiveLink(lose_sent=lambda d: True), timeout=0.6) is None  # no answer: None
+print("pico status ok")
+
 # `multiput --update`: refuses firmware from before over-the-air updates; otherwise installs the
 # bundled image, waits for the Pico to come back, and can change the Wi-Fi network.
 updater.time = types.SimpleNamespace(monotonic=updater.time.monotonic,
