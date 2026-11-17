@@ -3,6 +3,8 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); see `docs/development.md` (Versioning and releases) for when each number goes up.
 
 ## [Unreleased]
+
+## [0.3.0] - 2026-11-16
 ### Added
 - Over-the-air updates: `multiput --update` (Start menu: multiput update) installs new firmware and can change the Wi‑Fi network while the Pico stays in the dock, over Wi‑Fi or Bluetooth. Updates are signed with your key and checked as a whole before installing, Wi‑Fi details are encrypted, and a failed update leaves the current firmware running.
 
