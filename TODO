@@ -4,8 +4,6 @@
   - Mapping by pressing buttons ("press the Xbox button to change, then pick the Switch button") instead of typing names
 * Running on MacOS & Linux
   - Only XInput, the Windows Bluetooth COM-port detection and the installer are Windows-specific; protocol and links are portable
-* Updating WiFi over BT -- avoid having to switch the RPI from the console to the PC
-  - Related: re-flash without BOOTSEL -- PC sends a signed "reboot into flashing mode" so setup can flash the Pico in place
 * Support more controllers -- currently assumes XBox controller inputs (XInput)
   - Read controllers through SDL (PlayStation, Switch Pro, generic); pairs with the MacOS & Linux item
   - Confirm and document the Xbox Adaptive Controller (XInput, so it most likely already works)

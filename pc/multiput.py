@@ -31,11 +31,13 @@ except ImportError:
 from pathlib import Path
 
 import settings_store as store
+import setup_wizard
 from controller import (DEFAULT_MAP, DEFAULT_PAUSE, NEUTRAL_REPORT, SWITCH_BUTTONS, XBOX_BUTTONS, PauseToggle,
                         XINPUT_STATE, build_report, button_map, button_names, describe_pause, load_xinput,
                         parse_pause, pause_from_settings, pressed)
 from links import SerialLink, UdpLink, find_bt_port
 from perf import run_perf_test
+from updater import run_update
 from protocol import Session
 from setup_wizard import run_setup
 from version import BANNER, VERSION
@@ -58,6 +60,9 @@ def parse_args():
     p.add_argument("--controller", type=int, default=0, choices=range(4), help="XInput controller slot (default 0)")
     p.add_argument("--insecure", action="store_true",
                    help="send unsigned packets (Pico must be set up with --allow-unsigned)")
+    p.add_argument("--update", action="store_true",
+                   help="update the Pico's firmware (and optionally its Wi-Fi network) over the air, "
+                        "while it stays in the dock; close multiput first")
     p.add_argument("--perf-test", action="store_true",
                    help="measure the round trip to the Pico over Wi-Fi and Bluetooth, then exit (close multiput first)")
     p.add_argument("--remap", nargs="*", metavar="XBOX=SWITCH",
@@ -226,6 +231,15 @@ def main():
     saved = store.load_settings(cfg)
     if args.remap is not None:
         remap(args, cfg, saved)
+        return
+    if args.update:
+        if not (saved and "link" in saved):
+            raise SystemExit("Set up the Pico first: multiput --setup")
+        claim_single_instance()
+        run_update(args, open_link(args, cfg, saved), store.load_key(cfg), saved, store, cfg, FIRMWARE_DIR,
+                   setup_wizard.ask_wifi, setup_wizard.ask)
+        if FROZEN:
+            input("\nPress Enter to close... ")
         return
     if args.perf_test:
         if not (saved and "link" in saved):

@@ -9,6 +9,7 @@ setlocal
 cd /d "%~dp0.."
 
 if not exist build\firmware\multiput.uf2 goto :nofirmware
+if not exist build\firmware\multiput.bin goto :nofirmware
 
 py -3 -c "import sys; sys.exit(sys.version_info < (3, 11))" >nul 2>nul
 if errorlevel 1 (
@@ -49,5 +50,5 @@ if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86
 exit /b 0
 
 :nofirmware
-echo Missing build\firmware\multiput.uf2. Build it first: tools\build.bat (or tools/build_firmware.sh in WSL)
+echo Missing build\firmware\multiput.uf2 or multiput.bin. Build it first: tools\build.bat (or tools/build_firmware.sh in WSL)
 exit /b 1

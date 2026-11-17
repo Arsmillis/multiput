@@ -22,6 +22,9 @@ VERSION = read_version()
 BANNER = f"multiput {VERSION} - {COPYRIGHT} - {LICENSE} - {URL}"
 
 
+OTA_SINCE = (0, 3, 0)  # firmware from this version on can be updated over the air (multiput --update)
+
+
 def parse(version):
     """"0.2.0" -> (0, 2, 0); None if it isn't X.Y.Z (e.g. a "dev" build)."""
     parts = version.split(".")
@@ -30,14 +33,16 @@ def parse(version):
 
 def firmware_message(firmware, app=VERSION):
     """What to tell the user about the Pico's firmware version (None: it didn't report one)."""
-    update = "run multiput setup (Start menu: multiput setup) to update it"
+    over_usb = "run multiput setup (Start menu: multiput setup) to update it over USB"
     if firmware is None:
-        return f"Pico firmware is 0.1.0 or older (it doesn't report its version): {update}."
+        return f"Pico firmware is 0.1.0 or older (it doesn't report its version): {over_usb}."
     fw, mine = parse(firmware), parse(app)
     if fw is None or mine is None:
         return f"Pico firmware {firmware} (development build)."
     if fw < mine:
-        return f"Pico firmware {firmware} is older than this multiput ({app}): {update}."
+        how = ("run multiput update (Start menu: multiput update) to update it in place"
+               if fw >= OTA_SINCE else over_usb)
+        return f"Pico firmware {firmware} is older than this multiput ({app}): {how}."
     if fw > mine:
         return f"Pico firmware {firmware} is newer than this multiput ({app}): update multiput."
     return f"Pico firmware {firmware} (up to date)."

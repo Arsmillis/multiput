@@ -3,69 +3,25 @@
 """End-to-end protocol test: the PC's real protocol.Session/sign_packet and links against the Pico's
 protocol.h compiled for the desktop together with the core's own BearSSL sources.
 
-Run: python3 tests/test_protocol.py   (needs g++/gcc and the arduino-pico core installed;
-set RP2040_CORE to its folder if it isn't under ~/.arduino15)
+Run: python3 tests/test_protocol.py   (needs g++/gcc and the arduino-pico core; see tests/pico_sim.py)
 """
-import glob
 import os
 import pathlib
 import struct
-import subprocess
 import sys
-import tempfile
 import types
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pc"))
+sys.path.insert(0, str(ROOT / "tests"))
 import controller  # noqa: E402
 import links  # noqa: E402
+import pico_sim  # noqa: E402
 import protocol  # noqa: E402
+from pico_sim import FakeLink, ask, deliver  # noqa: E402
 
-CORE = pathlib.Path(os.environ.get("RP2040_CORE") or
-                    sorted(glob.glob(os.path.expanduser("~/.arduino15/packages/rp2040/hardware/rp2040/*")))[-1])
-BS = CORE / "tools/libbearssl/bearssl"
-SIM = pathlib.Path(tempfile.mkdtemp()) / "protocol_sim"
-objs = []
-for src in ["mac/hmac.c", "hash/sha2small.c", "codec/dec32be.c", "codec/enc32be.c"]:
-    obj = SIM.parent / (pathlib.Path(src).stem + ".o")
-    subprocess.run(["gcc", "-c", "-O1", f"-I{BS}/inc", f"-I{BS}/src", str(BS / "src" / src), "-o", str(obj)], check=True)
-    objs.append(str(obj))
-subprocess.run(["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", f"-I{CORE}/include",
-                f"-I{ROOT}/pico/multiput_pico", str(ROOT / "tests/protocol_sim.cpp"), *objs, "-o", str(SIM)], check=True)
-sim = subprocess.Popen([str(SIM)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-
-
-def ask(line):
-    sim.stdin.write(line + "\n")
-    sim.stdin.flush()
-    return sim.stdout.readline().strip()
-
-
-class FakeLink:
-    def __init__(self):
-        self.out, self.inbox = [], b""
-        self.reconnects = 0
-
-    def reconnect(self):
-        self.reconnects += 1
-
-    def send(self, d):
-        self.out.append(d)
-
-    def recv(self):
-        d, self.inbox = self.inbox, b""
-        return d
-
-
-def deliver(link):
-    """PC -> Pico as one byte stream (exercises Bluetooth framing); Pico replies go back to the PC."""
-    data = b"".join(link.out)
-    link.out.clear()
-    res = ask("feed " + data.hex()) if data else "-"
-    for tok in res.split():
-        if tok.startswith(("S:", "V:")):
-            link.inbox += bytes.fromhex(tok[2:])
-    return [bytes.fromhex(t[2:]) for t in res.split() if t.startswith("A:")]
+pico_sim.start()
+ask("fwversion 0.3.0")  # a Pico that reports its version; tests of older firmware set "-"
 
 
 # XInputGetStateEx writes 20 bytes; the buffer must hold them.
@@ -92,7 +48,7 @@ print("signed accepted ok")
 
 # Replay of a captured packet is rejected, and the Pico answers with SYNC.
 link.out.append(protocol.sign_packet(key, s.nonce, s.counter, r1))
-assert deliver(link) == [] and link.inbox.startswith(b"MN")
+assert deliver(link) == [] and protocol.SYNC_MAGIC in link.inbox  # the Pico answers a replay with SYNC
 s.poll(0.2)
 # Wrong key / tampered report rejected.
 link.out.append(protocol.sign_packet(os.urandom(32), s.nonce, s.counter + 5, r1))
@@ -327,5 +283,26 @@ s7 = protocol.Session(FakeLink(), key)
 s7.link.inbox = reply
 s7.poll(0.0)
 assert s7.firmware_version is None
+# The first VERSION reply can be lost (the Pico rate-limits replies, and UDP drops packets):
+# the PC asks again instead of concluding the firmware is too old to answer.
+ask("fwversion 0.3.0")
+ask(f"init {key.hex()} 0 49 50")
+dropped = {"n": 0}
+def lose_first_version(reply):
+    if reply[:2] == protocol.VERSION_MAGIC and dropped["n"] == 0:
+        dropped["n"] += 1
+        return True
+    return False
+live = pico_sim.LiveLink(lose_reply=lose_first_version)
+s8 = protocol.Session(live, key)
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    t = 400.0
+    while s8.version_asked != -1 and t < 410:
+        s8.poll(t)
+        t += 0.1
+assert dropped["n"] == 1 and s8.firmware_version == "0.3.0", (dropped, s8.firmware_version, out.getvalue())
+assert "0.1.0 or older" not in out.getvalue() and "Pico firmware 0.3.0" in out.getvalue()
+print("version reply lost once ok")
 print("firmware version check ok")
 print("ALL OK")

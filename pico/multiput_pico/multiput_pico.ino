@@ -15,6 +15,8 @@
 // (and stops reconnect attempts) while Bluetooth is in use.
 
 #include <Adafruit_TinyUSB.h>
+#include <LittleFS.h>
+#include <Updater.h>
 #include "settings.h"
 #include "protocol.h"
 
@@ -40,7 +42,10 @@ const uint32_t IN_USE_MS = 2000;       // a link is "in use" while signed input 
 extern "C" __attribute__((used, aligned(256))) const volatile Settings MULTIPUT_SETTINGS = {
   {'m', 'u', 'l', 't', 'i', 'p', 'u', 't', '-', 'c', 'o', 'n', 'f', 'i', 'g', '1'}, 0, 0, {0}, {0}, {0}
 };
-Settings settings;  // RAM copy, loaded in setup()
+Settings settings;  // the settings in use, loaded in setup() (see choose_settings in settings.h)
+uint32_t builtinHash = 0;
+uint32_t restartAtMs = 0;
+static const char *SETTINGS_FILE = "/settings.bin";
 
 // HORI HORIPAD S report descriptor (a Switch-compatible wired controller).
 static const uint8_t desc_hid_report[] = {
@@ -64,6 +69,7 @@ static const uint8_t desc_hid_report[] = {
 Adafruit_USBD_HID usb_hid;
 uint32_t lastPacketMs = 0;
 uint32_t lastSyncMs = 0;
+uint32_t lastVersionMs = 0;
 
 enum Link { LINK_WIFI, LINK_BT };
 uint32_t lastSignedMs[2];
@@ -87,12 +93,22 @@ size_t handleFrame(const uint8_t *buf, size_t len, Link link) {
     lastPacketMs = lastSignedMs[link] = millis();
     everSigned[link] = true;
   }
-  if ((f.wantSync || f.wantVersion) && millis() - lastSyncMs >= SYNC_INTERVAL_MS) {
+  if (f.replyLen) {  // over-the-air update reply: one per frame, not rate-limited (it paces the transfer)
+    if (link == LINK_WIFI) wifiReply(f.reply, f.replyLen);
+    else btReply(f.reply, f.replyLen);
+  } else if (f.wantSync && millis() - lastSyncMs >= SYNC_INTERVAL_MS) {
+    uint8_t sync[SYNC_LEN];
+    build_sync(sync);
+    if (link == LINK_WIFI) wifiReply(sync, SYNC_LEN);
+    else btReply(sync, SYNC_LEN);
+    lastSyncMs = millis();
+  } else if (f.wantVersion && millis() - lastVersionMs >= SYNC_INTERVAL_MS) {
+    // Its own rate limit: the PC asks right after a SYNC, which must not block the answer.
     uint8_t reply[3 + VERSION_MAX];
-    size_t len = f.wantSync ? (build_sync(reply), SYNC_LEN) : build_version(reply, FIRMWARE_VERSION);
+    size_t len = build_version(reply, FIRMWARE_VERSION);
     if (link == LINK_WIFI) wifiReply(reply, len);
     else btReply(reply, len);
-    lastSyncMs = millis();
+    lastVersionMs = millis();
   }
   return f.used;
 }
@@ -114,14 +130,66 @@ void haltNotConfigured() {
   }
 }
 
-void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
+bool storeSettings(const Settings &s) {
+  SavedSettings out = {s, builtinHash};
+  File f = LittleFS.open(SETTINGS_FILE, "w");
+  if (!f) return false;
+  bool ok = f.write((const uint8_t *)&out, sizeof out) == sizeof out;
+  f.close();
+  return ok;
+}
+
+void loadSettings() {
+  Settings builtin;
   for (size_t i = 0; i < sizeof(Settings); i++)
-    ((uint8_t *)&settings)[i] = ((const volatile uint8_t *)&MULTIPUT_SETTINGS)[i];
-  if (settings.configured != 1) haltNotConfigured();
+    ((uint8_t *)&builtin)[i] = ((const volatile uint8_t *)&MULTIPUT_SETTINGS)[i];
+  builtinHash = settings_hash(builtin);
+  SavedSettings saved;
+  bool haveSaved = false;
+  LittleFS.begin();  // formats the storage area on first use
+  File f = LittleFS.open(SETTINGS_FILE, "r");
+  if (f) {
+    haveSaved = f.read((uint8_t *)&saved, sizeof saved) == sizeof saved;
+    f.close();
+  }
+  switch (choose_settings(builtin, haveSaved ? &saved : nullptr)) {
+    case USE_BUILTIN:  // a fresh USB setup: keep it for over-the-air updates
+      settings = builtin;
+      storeSettings(settings);
+      break;
+    case USE_SAVED:
+      settings = saved.s;
+      break;
+    default:
+      haltNotConfigured();
+  }
   settings.ssid[sizeof settings.ssid - 1] = '\0';
   settings.pass[sizeof settings.pass - 1] = '\0';
+}
+
+// Over-the-air update storage (ota.h): the core's Updater writes the image to
+// firmware.bin in LittleFS, and the OTA loader installs it on the next boot.
+bool otaBegin(uint32_t size) { return Update.begin(size); }
+bool otaWrite(const uint8_t *data, size_t len) { return Update.write((uint8_t *)data, len) == len; }
+bool otaFinish() { return Update.end(); }
+void otaAbort() { Update.end(false); }  // incomplete, so discarded rather than installed
+bool otaSaveWifi(const char *ssid, const char *pass) {
+  Settings s = settings;
+  memset(s.ssid, 0, sizeof s.ssid);
+  memset(s.pass, 0, sizeof s.pass);
+  strncpy(s.ssid, ssid, sizeof s.ssid - 1);
+  strncpy(s.pass, pass, sizeof s.pass - 1);
+  return storeSettings(s);
+}
+void otaRestartSoon() { restartAtMs = (millis() + 300) | 1; }  // never 0, which means "no restart pending"
+uint32_t otaNowMs() { return millis(); }
+
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  loadSettings();
   protocol_init(settings.key, settings.flags & SETTINGS_ALLOW_UNSIGNED, rp2040.hwrand32(), rp2040.hwrand32());
+  ota_init(settings.key);
+  g_ota = {otaBegin, otaWrite, otaFinish, otaAbort, otaSaveWifi, otaRestartSoon, otaNowMs};
 
   // USB first, so the Switch sees the controller straight away; both links then
   // come up in the background.
@@ -147,6 +215,8 @@ void setup() {
 void loop() {
   wifiPoll(inUse(LINK_BT));
   btPoll(inUse(LINK_WIFI));
+  ota_poll();
+  if (restartAtMs && (int32_t)(millis() - restartAtMs) >= 0) rp2040.reboot();  // after an update
 
   bool live = millis() - lastPacketMs <= TIMEOUT_MS;
   if (!live) g_report = NEUTRAL;  // never leave buttons stuck

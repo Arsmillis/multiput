@@ -25,7 +25,7 @@ The key requirement is the first one. Many cheap boards can't present themselves
 **Bluetooth: built in, used when you choose it.** The firmware listens on both Wi‑Fi and Bluetooth, and multiput picks one (see the README's Wi‑Fi or Bluetooth section). Your Xbox controller's own Bluetooth connection is to the PC, not to the Pico.
 
 **Memory: not a concern.**
-- **Storage:** the Pico W has 2 MB of flash. The firmware is about 535 KB (25%), and most of that is the radio chip's own firmware and the Wi‑Fi and Bluetooth stacks. Our code is a few KB.
+- **Storage:** the Pico W has 2 MB of flash, split into 1 MB for the firmware and 1 MB of storage. The storage holds the Pico's settings and an incoming over-the-air update. The firmware is about 567 KB (54% of its 1 MB), and most of that is the radio chip's own firmware and the Wi‑Fi and Bluetooth stacks.
 - **RAM:** it has 264 KB. The firmware uses about 100 KB (38%), mostly network and Bluetooth buffers; the controller state is 8 bytes.
 
 **CPU: not a concern.** It has two 133 MHz cores and uses only one, which spends nearly all its time idle.

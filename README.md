@@ -84,7 +84,9 @@ If you try multiput on another console, open an issue with what worked and what 
 4. **Start multiput.** Back in the setup window, press Enter to start now, or later double-click the **multiput** desktop shortcut. When the window says `Controller connected.` and the Pico's LED is solid, presses go to both devices.
 
 **Later:**
-- To set up the Pico again (new Wi‑Fi network or new Pico), use **Start menu → multiput setup (flash the Pico)**. It offers the network name you used last time; just press Enter to keep it.
+- **To update the Pico's firmware or change its Wi‑Fi network, leave it where it is:** close multiput and use **Start menu → multiput update (Pico stays in place)**. The update goes over Wi‑Fi or Bluetooth, whichever multiput uses, and takes a few seconds over Wi‑Fi; then the Pico restarts. Over Bluetooth, allow a minute or two: a firmware update resets the Pico's Bluetooth pairing, and Windows re-pairs by itself before multiput can reconnect. If the Pico has no Wi‑Fi yet, or can't reach its network, switch to Bluetooth first (`multiput --link bt`).
+- **Coming from multiput 0.2.0 or earlier?** Run **multiput setup** over USB once more. The new firmware needs a different flash layout, which only a USB flash can set up. After that, updates work in place.
+- **To set up a new Pico, or as a fallback if an update ever fails,** use **Start menu → multiput setup (flash the Pico)** over USB. It offers the network name you used last time; just press Enter to keep it.
 - To uninstall, go to Settings → Apps → Installed apps → multiput → Uninstall. Your key and settings stay in `%APPDATA%\multiput`; delete that folder too if you won't reinstall.
 
 ## Use
@@ -96,7 +98,7 @@ Controller connected.
 ```
 **Pause the Switch side:** hold **View + Menu** for 1 second (or any of the combos you chose; see [Mapping](#mapping)). multiput beeps (low tone), and the Switch sees no buttons pressed until you hold a pause combo again (high tone). Your PC game keeps working the whole time, because it reads the controller directly. While a combo is held, its buttons aren't sent to the Switch, so View + Menu doesn't press − and + there.
 
-**Firmware version:** when it connects, multiput shows the Pico's firmware version, and tells you if it's older than multiput, so you know to run **multiput setup** again.
+**Firmware version:** when it connects, multiput shows the Pico's firmware version, and tells you if it's older than multiput and how to update it (normally **multiput update**, with the Pico staying where it is).
 
 **Change the mapping without restarting:** press **M** in the multiput window (see [Mapping](#mapping)).
 
@@ -112,9 +114,10 @@ The Pico's LED:
 
 ## Security
 Every packet is signed with a key that only your PC and your Pico have (HMAC‑SHA256, via BearSSL), so nobody on your network can send inputs to your Switch. Each packet also carries a counter, and the Pico picks a fresh random session value every time it boots, so recorded packets can't be replayed. The full protocol is described in `pico/multiput_pico/protocol.h`.
-- **Where things live.** Setup creates the key and keeps it in `%APPDATA%\multiput\multiput.key`. Your Wi‑Fi password is never saved on the PC: setup writes it straight into the Pico's firmware.
+- **Where things live.** Setup creates the key and keeps it in `%APPDATA%\multiput\multiput.key`. Your Wi‑Fi password is never saved on the PC: setup and updates send it straight to the Pico, which keeps its settings in its own flash.
 - **Physical access.** Anyone who can physically take the Pico can read its flash, which includes your Wi‑Fi password and the key. The RP2040 has no secure storage, so encrypting them on the Pico wouldn't help: the decryption key would have to sit right next to them. Treat the Pico like any device that knows your Wi‑Fi password.
-- **Changing the key:** run setup with `--new-key` (see [Development](docs/development.md)). This re-flashes the Pico with the new key.
+- **Updates.** Only your key can update the Pico. An update starts and finishes with signed messages, and the Pico checks a signature over the whole firmware image before installing it. That signature is tied to the Pico's current session, so a recorded update can't be replayed later. A new Wi‑Fi network and password are encrypted with your key before they're sent. An update that fails or is tampered with is discarded, and the Pico keeps its current firmware. Even in the worst case, a USB setup always works: the chip's built-in BOOTSEL mode can't be overwritten.
+- **Changing the key:** run setup with `--new-key` (see [Development](docs/development.md)). This re-flashes the Pico with the new key over USB; the key never changes over the air.
 - **Not protected against:** someone on the network jamming or dropping packets. The Pico then just releases all inputs.
 
 ## Mapping

@@ -23,11 +23,13 @@ multiput/
 │   ├── firmware.py         writes the settings block into a generic .uf2
 │   ├── settings_store.py   the key and saved settings in %APPDATA%\multiput
 │   ├── perf.py             multiput --perf-test: round-trip measurement over each link
+│   ├── updater.py          multiput --update: firmware and Wi-Fi updates over the air (PC half of ota.h)
 │   └── version.py          reads VERSION; the banner shown by --version and at startup
 ├── pico/multiput_pico/     the Pico W firmware (Arduino sketch; the folder must match the .ino name)
 │   ├── multiput_pico.ino   USB controller (HORIPAD S), main loop, settings block
 │   ├── protocol.h          wire protocol: frame parsing, signature check, sync
-│   ├── settings.h          layout of the settings block that --setup fills in
+│   ├── ota.h               over-the-air updates: signed image transfer, encrypted Wi-Fi changes
+│   ├── settings.h          the settings block that --setup fills in, and which settings win at boot
 │   ├── transport_wifi.h    Wi-Fi link (UDP, multiput.local); power-save while Bluetooth is in use
 │   ├── transport_bt.h      Bluetooth link; stops listening while Wi-Fi is in use
 │   └── transport_bt_serial.cpp   SerialBT wrapper, separate because its headers clash with TinyUSB
@@ -41,7 +43,9 @@ multiput/
 │   └── multiput.iss        Inno Setup installer definition
 ├── tests/
 │   ├── test_protocol.py    PC protocol + links against the Pico's protocol.h compiled for the desktop
-│   ├── protocol_sim.cpp    that desktop build of protocol.h
+│   ├── protocol_sim.cpp    that desktop build of protocol.h and ota.h (with in-memory storage)
+│   ├── pico_sim.py         builds and drives it; fake links for the tests
+│   ├── test_ota.py         over-the-air updates against ota.h, the settings choice, multiput --update
 │   ├── test_setup.py       .uf2 settings patching and the --setup flow
 │   ├── test_controller.py  button mapping, --remap, pause combos, M-key editing
 │   ├── test_perf.py        the performance test's measuring logic, against a fake Pico
@@ -83,6 +87,7 @@ Example: `multiput --setup --link wifi --ssid HomeNet --drive E:\`
 
 ## Overriding at run time
 - `multiput 192.168.1.50`: use this IP instead of the saved address, for networks that block `.local` names.
+- `multiput --update`: update the Pico's firmware (the bundled `firmware/multiput.bin`, or `--firmware FILE.bin`) and optionally its Wi‑Fi network (`--ssid`/`--password` skip the prompts), over the current link. It needs firmware 0.3.0 or newer on the Pico; older firmware gets a USB setup once. Protocol and safety details are in `pico/multiput_pico/ota.h`.
 - `multiput --perf-test`: measure the round trip over each link (see [Performance](performance.md)). It refuses to run alongside multiput; a named mutex (`Local\multiput`) stops two copies running at once.
 - `multiput --link wifi` / `--link bt`: switch link; remembered as the default. The Pico listens on both (see the README).
 - `multiput --bt COM5`: use Bluetooth on this port, skipping auto-detection. Without it, multiput finds the port of the paired device named `multiput`: Windows stores the device's Bluetooth address under `HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices`, and the outgoing COM port's hardware ID contains that address. It falls back to the saved port if that fails.
@@ -102,7 +107,7 @@ For a clickable icon without the installer, double-click `multiput.bat` in the r
 ## Building
 The README's [Building from source](../README.md#building-from-source) covers the scripted build (`tools\build.bat`, or each step on its own). Details:
 - **Firmware:** `tools/build_firmware.sh` installs `arduino-cli` into `~/.local/bin` and the rp2040 board core on first use. It passes the board URL on the command line, so your `arduino-cli` config isn't changed. Set `ARDUINO_CLI` to use a different `arduino-cli`. It warns if the installed core isn't the tested version (6.3.2). After building, it checks that the settings block landed in flash at 147 bytes.
-- **From the Arduino IDE:** open `pico/multiput_pico/multiput_pico.ino` and select board **Raspberry Pi Pico W** and USB Stack **Adafruit TinyUSB**. IP/Bluetooth Stack **IPv4 + Bluetooth**; the firmware uses both, so any other stack option stops the compile with an error saying so. Use Sketch → Export Compiled Binary, then configure the result with `multiput --setup --firmware <file>.uf2`. Uploading straight from the IDE gives a blank firmware (triple blink).
+- **From the Arduino IDE:** open `pico/multiput_pico/multiput_pico.ino` and select board **Raspberry Pi Pico W** and USB Stack **Adafruit TinyUSB**. IP/Bluetooth Stack **IPv4 + Bluetooth** (the firmware uses both, so any other stack option stops the compile with an error saying so), and Flash Size **2MB (Sketch: 1MB, FS: 1MB)**. The storage area holds the Pico's settings and incoming over-the-air updates. Use Sketch → Export Compiled Binary, then configure the result with `multiput --setup --firmware <file>.uf2`. Uploading straight from the IDE gives a blank firmware (triple blink).
 - **Installer:** `tools\build_installer.bat` builds `multiput.exe` with PyInstaller in `build\venv`, then the installer from `tools/multiput.iss`, installing Inno Setup with winget if needed. To release a new version, bump `AppVersion` in `tools/multiput.iss`.
 - **Logs** (all in `build\logs\`, replaced on each run):
   - `build.log`: everything `tools\build.bat` prints. It's written through PowerShell, because `cmd` can't show output and save it at the same time. Use `tools\build.bat --no-log` to skip it.

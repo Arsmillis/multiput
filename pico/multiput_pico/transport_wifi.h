@@ -71,7 +71,7 @@ void wifiPoll(bool btInUse) {
     powerSave = wanted;
   }
   MDNS.update();
-  uint8_t buf[64];
+  uint8_t buf[600];  // up to an over-the-air DATA frame (8 + 512 bytes)
   while (int len = udp.parsePacket()) {  // drain the queue
     if (len > (int)sizeof buf) {
       udp.flush();

@@ -35,7 +35,8 @@ trap 'rm -rf "$WORK"' EXIT
 OUT="$ROOT/build/firmware"
 LOGS="$ROOT/build/logs"  # full compiler output, one file per build
 mkdir -p "$OUT" "$LOGS"
-FQBN=rp2040:rp2040:rpipicow:usbstack=tinyusb
+# flash: 1 MB for the firmware, 1 MB of storage (settings, and over-the-air update images)
+FQBN=rp2040:rp2040:rpipicow:usbstack=tinyusb,flash=2097152_1048576
 
 LOG="$LOGS/firmware.log"
 VERSION=$(tr -d '[:space:]' < "$ROOT/VERSION")
@@ -51,6 +52,7 @@ fi
 grep -E "multiput_pico/[A-Za-z_]+\.(ino|h|cpp):[0-9]+:[0-9]+: warning" "$LOG" || true
 grep -E "^(Sketch uses|Global variables)" "$LOG"
 cp "$WORK/out/multiput_pico.ino.uf2" "$OUT/multiput.uf2"
+cp "$WORK/out/multiput_pico.ino.bin" "$OUT/multiput.bin"  # the over-the-air update image
 
 # The settings block must be in flash (so it is in the .uf2) and be 147 bytes.
 DATA=$("$CLI" config get directories.data)
@@ -58,4 +60,4 @@ NM=$(ls "$DATA"/packages/rp2040/tools/pqt-gcc/*/bin/arm-none-eabi-nm | head -1)
 "$NM" -S "$WORK/out/multiput_pico.ino.elf" | awk '/ MULTIPUT_SETTINGS$/ { found = 1
   ok = ($1 ~ /^10/ && $2 == "00000093"); print "== MULTIPUT_SETTINGS at 0x" $1 ", size 0x" $2 (ok ? " (ok)" : " (UNEXPECTED)") }
   END { exit !(found && ok) }'
-echo "Wrote $OUT/multiput.uf2"
+echo "Wrote $OUT/multiput.uf2 and multiput.bin"

@@ -12,7 +12,7 @@ void btListen(bool on);  // accept connections and be discoverable, or neither
 int btRead();            // next byte, or -1 if none
 void btWrite(const uint8_t *data, size_t len);
 
-static uint8_t rxBuf[128];
+static uint8_t rxBuf[640];  // must hold a whole frame: up to an over-the-air DATA frame (8 + 512 bytes)
 static size_t rxLen = 0;
 static bool btListening = true;  // SerialBT starts out connectable and discoverable
 

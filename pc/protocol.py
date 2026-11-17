@@ -23,7 +23,8 @@ KEY_LEN, MAC_LEN = 32, 16
 
 HELLO_RETRY_S = 0.5     # how often to ask the Pico for a session until it answers
 HELLO_ALIVE_S = 1.0     # once connected: a HELLO this often; the Pico's SYNC reply shows it's still there
-VERSION_TIMEOUT_S = 2.0  # no VERSION reply by then: firmware 0.1.0 or older (it can't answer)
+VERSION_RETRY_S = 0.5    # re-ask this often: a reply can be lost (UDP, or the Pico's reply rate limit)
+VERSION_TIMEOUT_S = 2.5  # no VERSION reply to any request by then: firmware 0.1.0 or older (it can't answer)
 LINK_TIMEOUT_S = 4.0    # no SYNC for this long -> reconnect the link (new IP, dropped Bluetooth)
 
 def sign_packet(key, nonce, counter, report):
@@ -42,6 +43,7 @@ class Session:
         self.firmware_version = None  # reported by the Pico; None until it answers (or never, for 0.1.0)
         self.version_asked = None     # when VERSION was requested (-1: answered or given up)
         self.version_nonce = None     # the Pico session it was requested for
+        self.version_sent = None      # when the last request went out (they're repeated until answered)
         self.lost = False
 
     @property
@@ -83,13 +85,18 @@ class Session:
                     # a new Pico session: first connection, or it restarted (maybe re-flashed)
                     self.link.send(VERSION_MAGIC)
                     self.firmware_version, self.version_asked, self.version_nonce = None, now, nonce
+                    self.version_sent = now
                 self.nonce, self.counter = nonce, last
             else:
                 self.counter = max(self.counter, last)
 
-        if self.version_asked not in (None, -1) and now - self.version_asked >= VERSION_TIMEOUT_S:
-            self.version_asked = -1  # gave up: firmware too old to answer
-            print(firmware_message(None))
+        if self.version_asked not in (None, -1):
+            if now - self.version_asked >= VERSION_TIMEOUT_S:
+                self.version_asked = -1  # no answer to any request: firmware too old to answer
+                print(firmware_message(None))
+            elif self.version_sent is None or now - self.version_sent >= VERSION_RETRY_S:
+                self.link.send(VERSION_MAGIC)
+                self.version_sent = now
         if now - self.last_heard >= LINK_TIMEOUT_S:
             if self.nonce is not None and not self.lost:  # only after having been connected
                 print("Lost contact with the Pico; reconnecting... (inputs on the Switch are released meanwhile)")
@@ -112,6 +119,15 @@ class Session:
         """multiput deliberately stopped polling (e.g. while the mapping editor was open):
         don't count that gap as the Pico going quiet."""
         self.last_heard = now
+
+    def signed_frame(self, magic, payload=b"", build=None):
+        """A signed frame: magic || counter || payload || mac, using the next counter.
+        build(counter) can make the payload from the counter (for ota.h's WIFI encryption)."""
+        self.counter += 1
+        if build:
+            payload = build(self.counter)
+        body = magic + struct.pack("<Q", self.counter) + payload
+        return body + hmac.new(self.key, self.nonce + body, hashlib.sha256).digest()[:MAC_LEN]
 
     def send(self, report):
         if self.key is None:

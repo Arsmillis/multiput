@@ -285,5 +285,7 @@ assert "older than" in version.firmware_message("0.9.9", "0.10.0")
 assert "newer than" in version.firmware_message("0.10.0", "0.9.9")
 assert "development build" in version.firmware_message("dev", "0.1.0")
 assert "0.1.0 or older" in version.firmware_message(None, "0.2.0")
+assert "multiput update" in version.firmware_message("0.3.0", "0.4.0")   # can update in place
+assert "over USB" in version.firmware_message("0.2.0", "0.4.0")          # too old: USB setup
 print("version ok")
 print("ALL OK")

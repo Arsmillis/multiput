@@ -10,6 +10,7 @@
 //   UNSIGNED  PC -> Pico  "MI" report[8]   (only if unsigned is allowed)   (10 bytes)
 //   VERSION?  PC -> Pico  "MV"
 //   VERSION   Pico -> PC  "MV" length[1] version[length]  (e.g. "0.2.0"; firmware 0.1.0 never answers)
+//   Over-the-air update frames (MU, MD, MC, MW, and the MR reply) are described in ota.h.
 //
 // mac = first 16 bytes of HMAC-SHA256(key, nonce || "MS" || counter || report).
 // The nonce is random per Pico boot, so packets recorded in an earlier session are
@@ -44,6 +45,8 @@ struct Frame {
   bool accepted;  // g_report was updated
   bool wantSync;  // caller should send a SYNC frame back
   bool wantVersion;  // caller should send a VERSION frame back
+  uint8_t reply[7];  // or this reply (an ota.h REPLY frame), if replyLen > 0
+  uint8_t replyLen;
 };
 
 static const size_t VERSION_MAX = 32;
@@ -68,22 +71,42 @@ static void accept_report(const uint8_t *p) {
   if (g_report.hat > 8) g_report.hat = 8;
 }
 
-static bool mac_ok(const uint8_t *frame) {
+static bool same_mac(const uint8_t *a, const uint8_t *b) {
+  uint8_t diff = 0;  // constant-time compare
+  for (size_t i = 0; i < MAC_LEN; i++) diff |= a[i] ^ b[i];
+  return diff == 0;
+}
+
+// A signed frame is body || mac, with mac = HMAC-SHA256(key, nonce || body)[:16].
+static bool signed_ok(const uint8_t *frame, size_t bodyLen) {
   br_hmac_context ctx;
   uint8_t mac[MAC_LEN];
   br_hmac_init(&ctx, &g_hmacKey, MAC_LEN);  // truncated to 16 bytes
   br_hmac_update(&ctx, g_nonce, NONCE_LEN);
-  br_hmac_update(&ctx, frame, SIGNED_BODY_LEN);
+  br_hmac_update(&ctx, frame, bodyLen);
   br_hmac_out(&ctx, mac);
-  uint8_t diff = 0;  // constant-time compare
-  for (size_t i = 0; i < MAC_LEN; i++) diff |= mac[i] ^ frame[SIGNED_BODY_LEN + i];
-  return diff == 0;
+  return same_mac(mac, frame + bodyLen);
 }
+
+// Signed frames carry counter[8] right after the magic; it must keep increasing.
+static bool take_counter(const uint8_t *frame) {
+  uint64_t counter;
+  memcpy(&counter, frame + 2, 8);  // RP2040 and x86 are little-endian
+  if (counter <= g_lastCounter) return false;  // replay or stale
+  g_lastCounter = counter;
+  return true;
+}
+
+static bool mac_ok(const uint8_t *frame) {
+  return signed_ok(frame, SIGNED_BODY_LEN);
+}
+
+static bool ota_frame(const uint8_t *b, size_t n, Frame &f);  // ota.h
 
 // Parses one frame at the start of buf. Works for single datagrams and byte streams
 // (on garbage it consumes 1 byte so a stream re-synchronises).
 static Frame parse_frame(const uint8_t *b, size_t n) {
-  Frame f = {0, false, false, false};
+  Frame f = {0, false, false, false, {0}, 0};
   if (n < 2) return f;
   if (b[0] != 'M') { f.used = 1; return f; }
   switch (b[1]) {
@@ -99,10 +122,7 @@ static Frame parse_frame(const uint8_t *b, size_t n) {
       if (n < SIGNED_LEN) return f;
       if (!mac_ok(b)) { f.used = 1; f.wantSync = true; return f; }
       f.used = SIGNED_LEN;
-      uint64_t counter;
-      memcpy(&counter, b + 2, 8);  // RP2040 and x86 are little-endian
-      if (counter <= g_lastCounter) { f.wantSync = true; return f; }  // replay or stale
-      g_lastCounter = counter;
+      if (!take_counter(b)) { f.wantSync = true; return f; }  // replay or stale
       accept_report(b + 10);
       f.accepted = true;
       return f;
@@ -115,6 +135,7 @@ static Frame parse_frame(const uint8_t *b, size_t n) {
       f.accepted = true;
       return f;
     default:
+      if (ota_frame(b, n, f)) return f;
       f.used = 1;
       return f;
   }
@@ -137,3 +158,5 @@ static void build_sync(uint8_t out[SYNC_LEN]) {
   memcpy(out + 2, g_nonce, NONCE_LEN);
   memcpy(out + 2 + NONCE_LEN, &g_lastCounter, 8);
 }
+
+#include "ota.h"

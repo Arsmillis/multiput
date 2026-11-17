@@ -3,12 +3,30 @@
 // Desktop build of the Pico protocol code, driven by tests/test_protocol.py over stdin:
 //   "init <keyhex> <allowUnsigned> <r1> <r2>" | "feed <hex>" (appended to a byte stream)
 //   "fwversion <x.y.z | ->" (what VERSION requests are answered with; "-" = never answer, like 0.1.0)
+//   "time <ms>" (the clock ota.h sees) | "storagefail <0|1>" | "otastate" (what the fake storage got)
+//   "choose <builtin> <saved> <savedFrom>" -> settings.h's choose_settings(); builtin and savedFrom are
+//     blank|A|B (built-in blocks), saved is none|garbage|X (X: a configured settings file)
 #include <cstdio>
 #include <iostream>
 #include <string>
 #include <vector>
 #include "protocol.h"
+#include "settings.h"
 using namespace std;
+
+// In-memory stand-in for the sketch's flash storage (ota.h's g_ota).
+static uint32_t simTime = 0, simSize = 0;
+static vector<uint8_t> simImage;
+static bool simFinished = false, simFail = false;
+static int simAborts = 0, simRestarts = 0;
+static string simSsid = "-", simPass = "-";
+static bool simBegin(uint32_t size) { simSize = size; simImage.clear(); simFinished = false; return !simFail; }
+static bool simWrite(const uint8_t *d, size_t n) { simImage.insert(simImage.end(), d, d + n); return !simFail; }
+static bool simFinish() { simFinished = simImage.size() == simSize; return simFinished && !simFail; }
+static void simAbort() { simAborts++; simImage.clear(); }
+static bool simSaveWifi(const char *ssid, const char *pass) { simSsid = ssid; simPass = pass; return !simFail; }
+static void simRestartSoon() { simRestarts++; }
+static uint32_t simNow() { return simTime; }
 
 static vector<uint8_t> unhex(const string &s) {
   vector<uint8_t> v;
@@ -32,8 +50,37 @@ int main() {
       uint32_t r1, r2;
       cin >> k >> allow >> r1 >> r2;
       protocol_init(unhex(k).data(), allow, r1, r2);
+      ota_init(unhex(k).data());
+      g_ota = {simBegin, simWrite, simFinish, simAbort, simSaveWifi, simRestartSoon, simNow};
       stream.clear();
       cout << "ok\n";
+    } else if (cmd == "time") {
+      cin >> simTime;
+      ota_poll();
+      cout << "ok\n";
+    } else if (cmd == "storagefail") {
+      cin >> simFail;
+      cout << "ok\n";
+    } else if (cmd == "otastate") {
+      cout << "size=" << simSize << " written=" << simImage.size() << " finished=" << simFinished
+           << " aborts=" << simAborts << " restarts=" << simRestarts << " wifi=" << (simSsid.empty() ? "<off>" : simSsid)
+           << "/" << (simPass.empty() ? "<none>" : simPass) << " image=" << hex(simImage.data(), simImage.size()) << "\n";
+    } else if (cmd == "choose") {
+      string b, s, from;
+      cin >> b >> s >> from;
+      auto block = [](const string &which) {
+        Settings x;
+        memset(&x, 0, sizeof x);
+        if (which != "blank") { x.configured = 1; x.ssid[0] = which[0]; }
+        return x;
+      };
+      Settings builtin = block(b);
+      SavedSettings saved;
+      memset(&saved, 0, sizeof saved);
+      if (s == "X") { saved.s.configured = 1; saved.s.ssid[0] = 'X'; }
+      saved.builtinHash = settings_hash(block(from));
+      SettingsChoice c = choose_settings(builtin, s == "none" ? nullptr : &saved);
+      cout << (c == USE_BUILTIN ? "BUILTIN" : c == USE_SAVED ? "SAVED" : "NONE") << "\n";
     } else if (cmd == "fwversion") {
       cin >> fwversion;
       cout << "ok\n";
@@ -50,6 +97,7 @@ int main() {
         off += f.used;
         if (f.accepted) out += "A:" + hex((uint8_t *)&g_report, 8) + " ";
         if (f.wantSync) { uint8_t s[SYNC_LEN]; build_sync(s); out += "S:" + hex(s, SYNC_LEN) + " "; }
+        if (f.replyLen) out += "R:" + hex(f.reply, f.replyLen) + " ";
         if (f.wantVersion && fwversion != "-") {
           uint8_t v[3 + VERSION_MAX];
           size_t n = build_version(v, fwversion.c_str());
