@@ -4,6 +4,15 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-17
+### Added
+- Pause with the keyboard: Ctrl+Alt+P pauses or resumes sending to the console, even while a game has focus. Change it with `PAUSE_KEY=` (e.g. `SHIFT+F12`, or `NONE`).
+- Adjustable pause hold time with `PAUSE_HOLD=` (seconds; `0` pauses with a single tap of the combo).
+- `BEEP=OFF` silences the pause and resume beep.
+- Sticky buttons (`STICKY=A,LT`): tap once to hold the button on the console, tap again to release. For players who can't hold a button down.
+- Turbo buttons (`TURBO=B`): while held, the console sees 10 presses a second.
+- All of these are set in the mapping editor (M key, Start menu, or `multiput --remap`) and take effect immediately with the M key.
+
 ## [0.3.1] - 2026-11-16
 ### Added
 - `multiput --pico-status` shows the Pico's firmware version and diagnostics, such as whether it holds Bluetooth pairing keys and what happened to them at the last update.

@@ -16,7 +16,8 @@ multiput/
 │   └── development.md      this file
 ├── pc/                     the Windows program (multiput.exe)
 │   ├── multiput.py         entry point: command line, main loop
-│   ├── controller.py       reads the Xbox controller (XInput), builds the Switch report, button mapping
+│   ├── controller.py       reads the Xbox controller (XInput), builds the Switch report, mapping, pause, sticky/turbo
+│   ├── hotkey.py           the system-wide keyboard shortcut for pausing (Windows RegisterHotKey)
 │   ├── protocol.py         signing and the session with the Pico (PC half of protocol.h)
 │   ├── links.py            Wi-Fi (UDP) and Bluetooth (COM port) connections, with reconnecting; finds the Pico's COM port
 │   ├── setup_wizard.py     multiput --setup: prompts, finding the Pico drive, flashing
@@ -93,7 +94,7 @@ Example: `multiput --setup --link wifi --ssid HomeNet --drive E:\`
 - `multiput --link wifi` / `--link bt`: switch link; remembered as the default. The Pico listens on both (see the README).
 - `multiput --bt COM5`: use Bluetooth on this port, skipping auto-detection. Without it, multiput finds the port of the paired device named `multiput`: Windows stores the device's Bluetooth address under `HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices`, and the outgoing COM port's hardware ID contains that address. It falls back to the saved port if that fails.
 - `multiput --controller 1`: use another XInput slot (0–3).
-- `multiput --remap XBOX=SWITCH ... PAUSE=A+B,C`: change the button mapping and pause combos (saved as `"buttons"` and `"pause"` in `settings.json`, only where they differ from the default; `"pause"` is a list of combos, and the older single-combo form `["XBOX"]` is still read). `--remap` alone opens the interactive editor, or just prints the mapping when there's no console. Pressing M in the running multiput window opens the same editor, and changes there apply immediately. `reset` clears everything. See the README's Mapping section for names.
+- `multiput --remap XBOX=SWITCH ... PAUSE=A+B,C PAUSE_HOLD=0.5 PAUSE_KEY=CTRL+ALT+P BEEP=OFF STICKY=A TURBO=B`: change the button mapping and pause combos (saved as `"buttons"`, `"pause"`, `"pause_hold"`, `"pause_key"`, `"beep"`, `"sticky"` and `"turbo"` in `settings.json`, only where they differ from the default; `"pause"` is a list of combos, and the older single-combo form `["XBOX"]` is still read). `--remap` alone opens the interactive editor, or just prints the mapping when there's no console. Pressing M in the running multiput window opens the same editor, and changes there apply immediately. `reset` clears everything. See the README's Mapping section for names.
 - `multiput --insecure`: send unsigned packets. The Pico must have been set up with `--allow-unsigned`.
 - `multiput --config-dir DIR`: keep the key and settings somewhere other than `%APPDATA%\multiput`, for example to run two separate setups.
 

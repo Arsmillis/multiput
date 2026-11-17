@@ -45,7 +45,9 @@ DEFAULT_MAP = {
 # Switch. Changeable with `multiput --remap PAUSE=VIEW+MENU,XBOX` (alternatives separated
 # by commas, buttons of a combo joined by '+'; NONE turns pausing off).
 DEFAULT_PAUSE = (("VIEW", "MENU"),)
-PAUSE_HOLD_S = 1.0
+PAUSE_HOLD_S = 1.0  # default; `PAUSE_HOLD=0.5` changes it, `PAUSE_HOLD=0` makes it a single tap
+MAX_PAUSE_HOLD_S = 10.0
+TURBO_HZ = 10       # TURBO buttons: presses per second while held
 
 # (up, right, down, left) -> HID hat value; 8 = centered
 HAT = {
@@ -134,19 +136,72 @@ def pause_from_settings(value):
     return tuple(tuple(c) for c in value)
 
 
-def describe_pause(combos):
+def describe_pause(combos, hold=PAUSE_HOLD_S):
     if not combos:
         return "off"
-    return f"hold {' or '.join(' + '.join(c) for c in combos)} for {PAUSE_HOLD_S:g} s"
+    buttons = " or ".join(" + ".join(c) for c in combos)
+    return f"tap {buttons}" if hold == 0 else f"hold {buttons} for {hold:g} s"
+
+
+def parse_hold(text):
+    """PAUSE_HOLD value: seconds, 0 (a single tap) up to MAX_PAUSE_HOLD_S. Raises ValueError."""
+    try:
+        hold = float(text)
+    except ValueError:
+        hold = -1
+    if not 0 <= hold <= MAX_PAUSE_HOLD_S:
+        raise ValueError(f"PAUSE_HOLD needs seconds from 0 (a single tap) to {MAX_PAUSE_HOLD_S:g}, got {text!r}")
+    return hold
+
+
+def parse_button_list(text, what):
+    """STICKY/TURBO value: Xbox buttons separated by ',' (or '+'), or NONE. Raises ValueError."""
+    if text.strip().upper() == "NONE":
+        return []
+    names = list(dict.fromkeys(n.strip().upper() for n in text.replace("+", ",").split(",") if n.strip()))
+    if not names or any(n not in XBOX_BUTTONS for n in names):
+        raise ValueError(f"{what} needs Xbox button names separated by ',' (e.g. {what}=A,LT) or NONE; "
+                         f"use: {' '.join(XBOX_BUTTONS)}")
+    return names
+
+
+class ButtonModes:
+    """Sticky and turbo buttons, applied to the held Xbox buttons before mapping.
+    Sticky: each press toggles the button on or off on the Switch (for players who can't
+    hold a button). Turbo: while held, the Switch sees TURBO_HZ presses per second."""
+
+    def __init__(self, sticky=(), turbo=()):
+        self.sticky, self.turbo = frozenset(sticky), frozenset(turbo)
+        self.latched, self.prev = set(), set()
+
+    def reset(self):
+        """Release everything (e.g. the controller disconnected)."""
+        self.latched.clear()
+        self.prev = set()
+
+    def apply(self, down, now):
+        """The buttons the Switch should see, given the physically held ones."""
+        for name in (down - self.prev) & self.sticky:  # newly pressed sticky buttons toggle
+            self.latched ^= {name}
+        self.prev = set(down)
+        out = (down - self.sticky - self.turbo) | self.latched
+        if int(now * TURBO_HZ * 2) % 2 == 0:  # first half of each turbo period: pressed
+            out |= down & self.turbo
+        return out
 
 
 class PauseToggle:
-    """Flips `paused` each time any of `combos` is held for PAUSE_HOLD_S (once per hold).
-    No combos: never toggles."""
+    """Flips `paused` each time any of `combos` is held for `hold` seconds (once per hold;
+    hold 0 = on the press itself). No combos: never toggles by buttons."""
 
-    def __init__(self, combos=DEFAULT_PAUSE):
+    def __init__(self, combos=DEFAULT_PAUSE, hold=PAUSE_HOLD_S):
         self.combos = tuple(frozenset(c) for c in combos if c)
+        self.hold = hold
         self.paused, self.since, self.fired = False, None, False
+
+    def toggle(self):
+        """Pause or resume from outside the controller (the keyboard shortcut)."""
+        self.paused = not self.paused
 
     def held(self, down):
         return any(c <= down for c in self.combos)
@@ -162,7 +217,7 @@ class PauseToggle:
             return False
         if self.since is None:
             self.since = now
-        if not self.fired and now - self.since >= PAUSE_HOLD_S:
+        if not self.fired and now - self.since >= self.hold:
             self.fired, self.paused = True, not self.paused
             return True
         return False
@@ -171,12 +226,13 @@ class PauseToggle:
 NEUTRAL_REPORT = struct.pack("<HBBBBBB", 0, 8, 128, 128, 128, 128, 0)  # nothing pressed
 
 
-def build_report(g, mapping=None, ignore=()):
+def build_report(g, mapping=None, ignore=(), down=None):
     """XINPUT_GAMEPAD -> 8-byte HORIPAD HID report. mapping comes from button_map();
-    buttons named in `ignore` are left out (the pause combo while it's held)."""
+    buttons named in `ignore` are left out (the pause combo while it's held). `down`
+    overrides which buttons count as held (ButtonModes' sticky/turbo result)."""
     mapping = mapping or button_map({})
     buttons = 0
-    for name in pressed(g) - set(ignore):
+    for name in (pressed(g) if down is None else set(down)) - set(ignore):
         buttons |= mapping[name]
     w = g.wButtons
     hat = HAT.get((bool(w & X_UP), bool(w & X_RIGHT), bool(w & X_DOWN), bool(w & X_LEFT)), 8)

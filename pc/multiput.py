@@ -30,11 +30,13 @@ except ImportError:
     msvcrt = None
 from pathlib import Path
 
+import hotkey
 import settings_store as store
 import setup_wizard
-from controller import (DEFAULT_MAP, DEFAULT_PAUSE, NEUTRAL_REPORT, SWITCH_BUTTONS, XBOX_BUTTONS, PauseToggle,
-                        XINPUT_STATE, build_report, button_map, button_names, describe_pause, load_xinput,
-                        parse_pause, pause_from_settings, pressed)
+from controller import (DEFAULT_MAP, DEFAULT_PAUSE, NEUTRAL_REPORT, PAUSE_HOLD_S, SWITCH_BUTTONS, TURBO_HZ,
+                        XBOX_BUTTONS, ButtonModes, PauseToggle, XINPUT_STATE, build_report, button_map, button_names,
+                        describe_pause, load_xinput, parse_button_list, parse_hold, parse_pause, pause_from_settings,
+                        pressed)
 from links import SerialLink, UdpLink, find_bt_port
 from perf import run_perf_test
 from updater import connect, pico_status, run_update
@@ -111,23 +113,43 @@ def open_link(args, cfg, saved):
         raise SystemExit("The Pico was set up without Wi-Fi. Use --link bt, or run multiput --setup to add Wi-Fi.")
     return UdpLink(saved.get("host", "multiput.local"))
 
+# Control settings besides the button mapping, with their defaults (saved only when changed).
+SETTING_DEFAULTS = {"pause_hold": PAUSE_HOLD_S, "pause_key": hotkey.DEFAULT, "beep": True, "sticky": [], "turbo": []}
+
+
 def update_mapping(saved, items):
-    """Apply remap items to the saved settings (in place, only if all are valid):
-    XBOX=SWITCH, PAUSE=VIEW+MENU,XBOX / PAUSE=NONE, or reset. Raises ValueError."""
+    """Apply remap items to the saved settings (in place, only if all are valid): XBOX=SWITCH,
+    PAUSE=VIEW+MENU,XBOX | NONE, PAUSE_HOLD=seconds, PAUSE_KEY=CTRL+ALT+P | NONE, BEEP=ON | OFF,
+    STICKY=A,LT | NONE, TURBO=B | NONE, or reset. Raises ValueError."""
     overrides, pause = dict(saved.get("buttons", {})), saved.get("pause")
+    settings = {k: saved[k] for k in SETTING_DEFAULTS if k in saved}
     for item in items:
         if item.lower() == "reset":
-            overrides, pause = {}, None
+            overrides, pause, settings = {}, None, {}
             continue
         key, sep, value = item.partition("=")
         if not sep:
-            raise ValueError(f"expected XBOX=SWITCH (e.g. LB=ZL) or PAUSE=VIEW+MENU, got {item!r}")
+            raise ValueError(f"expected NAME=VALUE (e.g. LB=ZL, PAUSE=VIEW+MENU, STICKY=A), got {item!r}")
         key, value = key.strip().upper(), value.strip()
         if key == "PAUSE":
             pause = [list(c) for c in parse_pause(value)]
+        elif key == "PAUSE_HOLD":
+            settings["pause_hold"] = parse_hold(value)
+        elif key == "PAUSE_KEY":
+            parsed = hotkey.parse(value)
+            settings["pause_key"] = parsed[2] if parsed else ""
+        elif key == "BEEP":
+            if value.upper() not in ("ON", "OFF"):
+                raise ValueError(f"BEEP needs ON or OFF, got {value!r}")
+            settings["beep"] = value.upper() == "ON"
+        elif key in ("STICKY", "TURBO"):
+            settings[key.lower()] = parse_button_list(value, key)
         else:
             overrides[key] = value.upper()
     names = button_names(overrides)  # validates
+    both = set(settings.get("sticky", [])) & set(settings.get("turbo", []))
+    if both:
+        raise ValueError(f"{', '.join(sorted(both))} can't be both STICKY and TURBO")
     overrides = {x: sw for x, sw in names.items() if sw != DEFAULT_MAP[x]}  # keep only real changes
     if overrides:
         saved["buttons"] = overrides
@@ -137,10 +159,19 @@ def update_mapping(saved, items):
         saved.pop("pause", None)
     else:
         saved["pause"] = pause
+    for k, default in SETTING_DEFAULTS.items():
+        if k in settings and settings[k] != default:
+            saved[k] = settings[k]
+        else:
+            saved.pop(k, None)
 
 
 def pause_combos(saved):
     return pause_from_settings(saved["pause"]) if saved and "pause" in saved else DEFAULT_PAUSE
+
+
+def setting(saved, name):
+    return (saved or {}).get(name, SETTING_DEFAULTS[name])
 
 
 def print_mapping(saved):
@@ -148,7 +179,15 @@ def print_mapping(saved):
     print("Xbox    -> Switch")
     for xbox, switch in names.items():
         print(f"{xbox:7s} -> {switch}{'   (changed)' if switch != DEFAULT_MAP[xbox] else ''}")
-    print(f"PAUSE   -> {describe_pause(pause_combos(saved))}{'   (changed)' if 'pause' in saved else ''}")
+    changed = lambda name: "   (changed)" if name in saved else ""
+    print(f"PAUSE   -> {describe_pause(pause_combos(saved), setting(saved, 'pause_hold'))}{changed('pause')}")
+    print()
+    print(f"PAUSE_HOLD -> {setting(saved, 'pause_hold'):g} s{' (a single tap)' if setting(saved, 'pause_hold') == 0 else ''}"
+          f"{changed('pause_hold')}")
+    print(f"PAUSE_KEY  -> {setting(saved, 'pause_key') or 'off'}  (keyboard shortcut, works in games){changed('pause_key')}")
+    print(f"BEEP       -> {'ON' if setting(saved, 'beep') else 'OFF'}{changed('beep')}")
+    print(f"STICKY     -> {', '.join(setting(saved, 'sticky')) or 'none'}  (each press toggles the button){changed('sticky')}")
+    print(f"TURBO      -> {', '.join(setting(saved, 'turbo')) or 'none'}  ({TURBO_HZ} presses/s while held){changed('turbo')}")
 
 
 def edit_mapping(cfg, saved):
@@ -156,9 +195,10 @@ def edit_mapping(cfg, saved):
     print_mapping(saved)
     print(f"\nXbox names:   {' '.join(XBOX_BUTTONS)}")
     print(f"Switch names: {' '.join(SWITCH_BUTTONS)}")
+    print("Examples: A=B B=A | PAUSE=VIEW+MENU,XBOX | PAUSE_HOLD=0 (tap) | PAUSE_KEY=CTRL+ALT+P or NONE")
+    print("          BEEP=OFF | STICKY=A,LT | TURBO=B | reset (everything back to the default)")
     while True:
-        line = input("\nChanges (e.g. A=B B=A, PAUSE=VIEW+MENU, PAUSE=VIEW+MENU,XBOX, PAUSE=NONE, reset), "
-                     "or Enter to finish: ").strip()
+        line = input("\nChanges, or Enter to finish: ").strip()
         if not line:
             return
         try:
@@ -185,21 +225,49 @@ def remap(args, cfg, saved):
         print_mapping(saved)
 
 
-def edit_while_running(cfg, saved, pause, session):
-    """M key in the multiput window: edit the mapping, then use it straight away.
-    Returns the new (mapping, PauseToggle)."""
+class Controls:
+    """What the main loop needs from the control settings; rebuilt after an M-key edit."""
+
+    def __init__(self, saved, previous=None):
+        self.mapping = button_map(saved.get("buttons", {}))
+        self.pause = PauseToggle(pause_combos(saved), setting(saved, "pause_hold"))
+        self.modes = ButtonModes(setting(saved, "sticky"), setting(saved, "turbo"))
+        self.beep = setting(saved, "beep")
+        spec = setting(saved, "pause_key")
+        if previous and previous.hotkey.spec == (hotkey.parse(spec)[2] if spec else ""):
+            self.hotkey = previous.hotkey  # unchanged: keep it registered
+        else:
+            if previous:
+                previous.hotkey.stop()
+            self.hotkey = hotkey.Hotkey(spec)
+        if previous:  # stay paused, unless there's no longer a way to resume
+            self.pause.paused = previous.pause.paused and (bool(self.pause.combos) or self.hotkey.active)
+
+    def describe_pause(self, saved):
+        ways = []
+        if self.pause.combos:
+            ways.append(describe_pause(pause_combos(saved), self.pause.hold))
+        if self.hotkey.active:
+            ways.append(f"press {self.hotkey.spec} on the keyboard")
+        return " or ".join(ways) or "off"
+
+
+def edit_while_running(cfg, saved, controls, session):
+    """M key in the multiput window: edit the mapping and settings, then use them straight
+    away. Returns the new Controls."""
     session.send(NEUTRAL_REPORT)  # release everything on the Switch while we're away
     print("\nEditing the mapping. The Switch gets no input until you finish (empty line).\n")
     edit_mapping(cfg, saved)
-    new_pause = PauseToggle(pause_combos(saved))
-    new_pause.paused = pause.paused and bool(new_pause.combos)  # never stay paused with no way to resume
+    new = Controls(saved, controls)
     session.excuse_silence(time.monotonic())
-    print("\nMapping updated. Sending to the Switch again." + (" (Still paused.)" if new_pause.paused else ""))
-    return button_map(saved.get("buttons", {})), new_pause
+    print("\nMapping updated. Sending to the Switch again." + (" (Still paused.)" if new.pause.paused else ""))
+    return new
 
 
-def beep(paused):
-    """Short tone so you know pause toggled without looking at the window."""
+def beep(paused, enabled=True):
+    """Short tone so you know pause toggled without looking at the window (BEEP=OFF: silent)."""
+    if not enabled:
+        return
     try:
         import winsound
     except ImportError:
@@ -275,8 +343,7 @@ def main():
     saved = saved or {}
     claim_single_instance()
     key = None if args.insecure else store.load_key(cfg)
-    mapping = button_map(saved.get("buttons", {}))
-    pause = PauseToggle(pause_combos(saved))
+    controls = Controls(saved)
     get_state = load_xinput()
     link = open_link(args, cfg, saved)
     session = Session(link, key)
@@ -286,44 +353,55 @@ def main():
     if saved.get("buttons"):
         changes = ", ".join(f"{x}->{sw}" for x, sw in saved["buttons"].items())
         print(f"Custom button mapping: {changes}.")
-    if pause.combos:
-        print(f"Pause/resume sending to the Switch: {describe_pause(pause_combos(saved))}.")
+    if controls.pause.combos or controls.hotkey.active:
+        print(f"Pause/resume sending to the Switch: {controls.describe_pause(saved)}.")
+    if controls.hotkey.error:
+        print(f"Keyboard shortcut not available: {controls.hotkey.error}. Change it with PAUSE_KEY (press M).")
+    if controls.modes.sticky or controls.modes.turbo:
+        print("Sticky: " + (", ".join(sorted(controls.modes.sticky)) or "none") +
+              f" | Turbo: " + (", ".join(sorted(controls.modes.turbo)) or "none") + ".")
     if msvcrt:
         print("Press M in this window to change the button mapping.")
     if not session.ready:
         print("Waiting for the Pico...")
 
     state = XINPUT_STATE()
-    last_packet, last_sent, connected = None, 0.0, None
+    last_report, last_sent, connected = None, 0.0, None
     while True:
         now = time.monotonic()
         session.poll(now)
         if msvcrt and msvcrt.kbhit() and msvcrt.getwch().lower() == "m":
-            mapping, pause = edit_while_running(cfg, saved, pause, session)
-            last_packet = None  # send the current state with the new mapping right away
+            controls = edit_while_running(cfg, saved, controls, session)
+            last_report = None  # send the current state with the new settings right away
             continue
         ok = get_state(args.controller, ctypes.byref(state)) == 0
         if ok != connected:
             connected = ok
             print("Controller connected." if ok else "Controller not connected; waiting...")
+            controls.modes.reset()  # release sticky buttons when the controller goes away
+        toggled = controls.hotkey.fired()  # the keyboard shortcut works even without a controller
+        if toggled:
+            controls.pause.toggle()
+        down = pressed(state.Gamepad) if ok else set()
+        if (ok and controls.pause.update(down, now)) or toggled:
+            print(f"Paused: the Switch gets no input (the PC still does). To resume: {controls.describe_pause(saved)}."
+                  if controls.pause.paused else "Resumed: sending to the Switch again.")
+            beep(controls.pause.paused, controls.beep)
         if not ok:
             time.sleep(POLL_S)  # no packets: the Pico releases everything after its timeout
             continue
-        down = pressed(state.Gamepad)
-        if pause.update(down, now):
-            print(f"Paused: the Switch gets no input (the PC still does). To resume: {describe_pause(pause_combos(saved))}."
-                  if pause.paused else "Resumed: sending to the Switch again.")
-            beep(pause.paused)
-            last_packet = None  # send the new state right away
-        if session.ready and (state.dwPacketNumber != last_packet or now - last_sent >= KEEPALIVE_S):
-            if pause.paused:
-                report = NEUTRAL_REPORT  # still sent, so the link stays alive
-            else:
-                # While a pause combo is held, keep its buttons off the Switch.
-                report = build_report(state.Gamepad, mapping, pause.held_buttons(down))
+        held = controls.modes.apply(down, now)
+        if controls.pause.paused:
+            report = NEUTRAL_REPORT  # still sent, so the link stays alive
+        else:
+            # While a pause combo is held, keep its buttons off the Switch.
+            report = build_report(state.Gamepad, controls.mapping, controls.pause.held_buttons(down), held)
+        # Send on any change (turbo changes the report while the controller is still) and as a keepalive.
+        if session.ready and (report != last_report or now - last_sent >= KEEPALIVE_S):
             session.send(report)
-            last_packet, last_sent = state.dwPacketNumber, now
+            last_report, last_sent = report, now
         time.sleep(POLL_S)
+
 
 def run():
     """Entry point. When started by double-click, keep error messages on screen."""

@@ -7,7 +7,6 @@
 * Support more controllers -- currently assumes XBox controller inputs (XInput)
   - Read controllers through SDL (PlayStation, Switch Pro, generic); pairs with the MacOS & Linux item
   - Confirm and document the Xbox Adaptive Controller (XInput, so it most likely already works)
-* Option for the "beep" that gets thrown when PAUSE is sent to the RPI
 * Support for other consoles
   - Switch 1: should already work (same HORIPAD), untested
   - PlayStation / Xbox: not possible -- they require authentication chips in controllers
@@ -19,8 +18,7 @@ Ease of use
 * Code signing (removes the "Windows protected your PC" warning and most antivirus false alarms)
 
 Accessibility
-* Pause: adjustable hold time, single-tap option, keyboard hotkey
-* Toggle / "sticky" buttons, turbo, one button sending a combination
+* One button sending a combination of buttons
 * Stick and trigger options: swap sticks, d-pad <-> stick, deadzones, sensitivity, inverted axes, trigger threshold
 * Two-controller co-pilot: merge two controllers into one on the Switch (assisted play)
 * Status that doesn't rely on one sense: notifications/tray state alongside beeps and the LED; screen-reader-friendly console progress

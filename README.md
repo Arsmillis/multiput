@@ -96,7 +96,7 @@ Sending controller 0 to multiput.local (192.168.1.50:41234). Ctrl+C or close thi
 Pico session started.
 Controller connected.
 ```
-**Pause the Switch side:** hold **View + Menu** for 1 second (or any of the combos you chose; see [Mapping](#mapping)). multiput beeps (low tone), and the Switch sees no buttons pressed until you hold a pause combo again (high tone). Your PC game keeps working the whole time, because it reads the controller directly. While a combo is held, its buttons aren't sent to the Switch, so View + Menu doesn't press − and + there.
+**Pause the Switch side:** hold **View + Menu** for 1 second, or press **Ctrl+Alt+P** on the keyboard, which works even while a game has focus. You can change the combo, the hold time (down to a single tap) and the shortcut; see [Mapping](#mapping). multiput beeps (low tone), and the Switch sees no buttons pressed until you pause again to resume (high tone). Turn the beep off with `BEEP=OFF`. Your PC game keeps working the whole time, because it reads the controller directly. While a combo is held, its buttons aren't sent to the Switch, so View + Menu doesn't press − and + there.
 
 **Firmware version:** when it connects, multiput shows the Pico's firmware version, and tells you if it's older than multiput and how to update it (normally **multiput update**, with the Pico staying where it is).
 
@@ -125,7 +125,7 @@ Buttons map by label by default (Xbox A → Switch A, B → B, X → X, Y → Y)
 
 **Remapping:** while multiput is running, click its window and press **M**. Otherwise, open **Start menu → multiput button mapping** (or run `multiput --remap`). It shows the current mapping and lets you type changes until you press Enter on an empty line. Changes are saved straight away. With **M**, they also take effect immediately; the Switch gets no input while the editor is open. Otherwise they're used the next time multiput starts.
 
-Changes are `XBOX=SWITCH` pairs, plus `PAUSE=` for the pause combos. Put several changes on one line separated by spaces. In `PAUSE=`, join the buttons of a combo with `+`, and list alternative combos with `,`: holding any one of them pauses or resumes, so you can keep one that suits each game. If any change on a line is invalid, none of them are applied.
+Changes are `XBOX=SWITCH` pairs, plus `PAUSE=` for the pause combos and the settings below. Put several changes on one line separated by spaces. In `PAUSE=`, join the buttons of a combo with `+`, and list alternative combos with `,`: holding any one of them pauses or resumes, so you can keep one that suits each game. If any change on a line is invalid, none of them are applied.
 ```
 A=B B=A X=Y Y=X      map by position instead of by label
 VIEW=CAPTURE         View becomes the Switch's Capture button
@@ -133,7 +133,12 @@ LT=NONE              LT does nothing on the Switch
 PAUSE=XBOX           pause by holding the Xbox button for 1 s
 PAUSE=LB+RB          pause by holding LB + RB for 1 s
 PAUSE=VIEW+MENU,XBOX pause by holding either View + Menu or the Xbox button
-PAUSE=NONE           turn pausing off
+PAUSE=NONE           turn pausing by buttons off
+PAUSE_HOLD=0         pause with a single tap of the combo (or e.g. 0.5 for half a second)
+PAUSE_KEY=SHIFT+F12  a different keyboard shortcut (NONE to turn it off)
+BEEP=OFF             no beep when pausing or resuming
+STICKY=A,LT          A and LT toggle: tap once to hold, tap again to release
+TURBO=B              holding B sends 10 presses a second
 reset                everything back to the default
 ```
 You can also pass them straight on the command line, e.g. `multiput --remap A=B B=A PAUSE=VIEW+MENU,XBOX`. From a source checkout use `py pc\multiput.py --remap`; for an installed copy without the shortcut, use `"%LOCALAPPDATA%\Programs\multiput\multiput.exe" --remap`.
@@ -143,7 +148,9 @@ You can also pass them straight on the command line, e.g. `multiput --remap A=B 
 | **Xbox** | `A` `B` `X` `Y` `LB` `RB` `LT` `RT` `VIEW` `MENU` `LS` `RS` `XBOX` |
 | **Switch** | `A` `B` `X` `Y` `L` `R` `ZL` `ZR` `MINUS` `PLUS` `LSTICK` `RSTICK` `HOME` `CAPTURE` `NONE` |
 
-The d-pad and sticks always map straight across. Pause combos use Xbox (physical) button names, whatever those buttons are remapped to, and a combo's buttons aren't sent to the Switch while it's held. Remapping only affects the Switch; PC games still see the Xbox controller as it is.
+**Sticky and turbo** help when holding or repeatedly pressing a button is hard. A sticky button stays held on the Switch until you tap it again. It's released if the controller disconnects, and stays held while paused. A turbo button repeats while you hold it. A button can't be both. Keyboard shortcuts need Ctrl, Alt or Win with a letter or digit, so they don't interfere with typing. F1–F24, Pause, Scroll Lock, Insert, Home, End, Page Up and Page Down also work, with or without modifiers.
+
+The d-pad and sticks always map straight across. Pause combos, sticky and turbo use Xbox (physical) button names, whatever those buttons are remapped to, and a combo's buttons aren't sent to the Switch while it's held. Remapping only affects the Switch; PC games still see the Xbox controller as it is.
 
 ## Notes
 - If no valid input arrives for 250 ms (Wi‑Fi hiccup, multiput closed, controller off), the Pico releases every input, so buttons never get stuck. If the Pico loses Wi‑Fi, it keeps retrying in the background (every 10 s) without disturbing Bluetooth. multiput notices within about 4 s when the Pico stops answering, and reconnects on its own, even if the Pico came back with a new IP address or the Bluetooth link dropped.

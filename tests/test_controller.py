@@ -156,28 +156,44 @@ class FakeSession:
         self.sent.append(report)
     def excuse_silence(self, now):
         self.excused = now
+import hotkey  # noqa: E402
+
+class FakeHotkey:  # stands in for the Windows shortcut (not available on Linux)
+    def __init__(self, spec):
+        self.spec, self.error, self.active, self.stopped = (hotkey.parse(spec)[2] if spec else ""), None, bool(spec), False
+    def fired(self):
+        return False
+    def stop(self):
+        self.stopped = True
+real_hotkey = hotkey.Hotkey
+hotkey.Hotkey = FakeHotkey
+
+def edit(saved, previous, *lines):
+    it = iter([*lines, ""])
+    multiput.input = lambda prompt: next(it)
+    sess = FakeSession()
+    with contextlib.redirect_stdout(io.StringIO()):
+        new = multiput.edit_while_running(cfg, saved, previous, sess)
+    del multiput.input
+    return new, sess
+
 cfg = pathlib.Path(tempfile.mkdtemp())
 saved = {"link": "wifi", "host": "multiput.local"}
-paused = c.PauseToggle()
-paused.paused = True
-sess = FakeSession()
-lines = iter(["A=B PAUSE=NONE", ""])
-multiput.input = lambda prompt: next(lines)
-with contextlib.redirect_stdout(io.StringIO()):
-    new_map, new_pause = multiput.edit_while_running(cfg, saved, paused, sess)
-del multiput.input
+controls = multiput.Controls(saved)
+controls.pause.paused = True
+new, sess = edit(saved, controls, "A=B PAUSE=NONE PAUSE_KEY=NONE")
 assert sess.sent == [c.NEUTRAL_REPORT] and sess.excused is not None
-assert switch_buttons(c.build_report(pad(c.X_A), new_map)) == c.S_B
-assert new_pause.combos == () and not new_pause.paused   # pausing turned off: not stuck paused
+assert switch_buttons(c.build_report(pad(c.X_A), new.mapping)) == c.S_B
+assert new.pause.combos == () and not new.pause.paused   # no way left to resume: not stuck paused
+assert controls.hotkey.stopped                           # the old shortcut was released
 assert json.loads((cfg / "settings.json").read_text())["buttons"] == {"A": "B"}
-lines = iter(["PAUSE=XBOX", ""])
-multiput.input = lambda prompt: next(lines)
-still = c.PauseToggle()
-still.paused = True
-with contextlib.redirect_stdout(io.StringIO()):
-    _, kept = multiput.edit_while_running(cfg, saved, still, FakeSession())
-del multiput.input
-assert kept.paused and kept.combos == (frozenset({"XBOX"}),)   # stays paused, resumable with the new combo
+new.pause.paused = True
+kept, _ = edit(saved, new, "PAUSE=XBOX")
+assert kept.pause.paused and kept.pause.combos == (frozenset({"XBOX"}),)   # resumable with the new combo
+kept2, _ = edit(saved, kept, "PAUSE=NONE PAUSE_KEY=CTRL+ALT+P")
+assert kept2.pause.paused and kept2.hotkey.active          # no combo, but the keyboard shortcut can resume
+same, _ = edit(saved, kept2, "B=A")
+assert same.hotkey is kept2.hotkey                          # unchanged shortcut: kept registered, not re-created
 class QuietLink:
     reconnects = 0
     def send(self, d): pass
@@ -192,4 +208,83 @@ assert QuietLink.reconnects == 0
 real.poll(160.1 + protocol.LINK_TIMEOUT_S)   # genuinely quiet afterwards: still detected
 assert QuietLink.reconnects == 1
 print("M-key editing ok")
+
+# Sticky buttons: each press toggles the button on the Switch; turbo: on/off at TURBO_HZ while held.
+m = c.ButtonModes(sticky=["A", "LT"], turbo=["B"])
+assert m.apply({"A"}, 0.0) == {"A"}            # press: on
+assert m.apply(set(), 0.01) == {"A"}           # released physically: still on
+assert m.apply({"A"}, 0.02) == set()           # press again: off
+assert m.apply({"A"}, 0.03) == set()           # still held: no second toggle
+assert m.apply({"X"}, 0.04) == {"X"}           # other buttons pass through
+period = 1 / c.TURBO_HZ
+assert "B" in m.apply({"B"}, 1.0) and "B" not in m.apply({"B"}, 1.0 + period * 0.6)
+assert "B" in m.apply({"B"}, 1.0 + period) and m.apply(set(), 1.0 + period * 1.1) == set()
+m.apply({"LT"}, 2.0)
+m.reset()                                      # controller disconnected: everything released
+assert m.apply(set(), 2.1) == set()
+r = c.build_report(pad(c.X_X), c.button_map({}), (), {"A"})   # `down` overrides the physical buttons
+assert switch_buttons(r) == c.S_A
+print("sticky and turbo ok")
+
+# Pause hold time: 0 = a single tap; any value toggles once per press/hold; the keyboard toggles too.
+t = c.PauseToggle((("XBOX",),), hold=0)
+assert t.update({"XBOX"}, 0.0) and t.paused and not t.update({"XBOX"}, 5.0)
+assert not t.update(set(), 5.1) and t.update({"XBOX"}, 5.2) and not t.paused
+t = c.PauseToggle(hold=0.5)
+assert not t.update({"VIEW", "MENU"}, 0.0) and t.update({"VIEW", "MENU"}, 0.5)
+t.toggle()
+assert not t.paused
+assert c.describe_pause((("XBOX",),), 0) == "tap XBOX" and c.describe_pause((("XBOX",),), 2) == "hold XBOX for 2 s"
+assert c.parse_hold("0") == 0 and c.parse_hold("0.25") == 0.25
+for bad in ["-1", "11", "soon", ""]:
+    try:
+        c.parse_hold(bad)
+        raise AssertionError(f"accepted PAUSE_HOLD={bad!r}")
+    except ValueError:
+        pass
+assert c.parse_button_list("a, lt+A", "STICKY") == ["A", "LT"] and c.parse_button_list("none", "TURBO") == []
+for bad in ["", "JUMP", "A,UP"]:
+    try:
+        c.parse_button_list(bad, "STICKY")
+        raise AssertionError(f"accepted STICKY={bad!r}")
+    except ValueError:
+        pass
+print("pause hold ok")
+
+# Keyboard shortcut specs: modifiers + key; letters/digits/Space need Ctrl, Alt or Win.
+assert hotkey.parse("ctrl + alt + p") == (0x2 | 0x1, ord("P"), "CTRL+ALT+P")
+assert hotkey.parse("SHIFT+F12") == (0x4, 0x70 + 11, "SHIFT+F12") and hotkey.parse("pause")[1] == 0x13
+assert hotkey.parse("NONE") is None and hotkey.parse("WIN+1")[1] == ord("1")
+for bad in ["P", "SHIFT+A", "CTRL+X+P", "CTRL+F25", "CTRL+", "SPACE", "HYPER+P"]:
+    try:
+        hotkey.parse(bad)
+        raise AssertionError(f"accepted PAUSE_KEY={bad!r}")
+    except ValueError:
+        pass
+assert real_hotkey("").active is False                         # no shortcut: nothing registered
+print("keyboard shortcut parsing ok")
+
+# The new settings in --remap / the editor: saved only when changed; reset clears them.
+cfg = pathlib.Path(tempfile.mkdtemp())
+store.save_settings(cfg, {"link": "wifi"})
+saved, out = run_remap("PAUSE_HOLD=0", "PAUSE_KEY=shift+f12", "BEEP=off", "STICKY=A,LT", "TURBO=B")
+assert saved == {"link": "wifi", "pause_hold": 0.0, "pause_key": "SHIFT+F12", "beep": False,
+                 "sticky": ["A", "LT"], "turbo": ["B"]}, saved
+assert "PAUSE   -> tap VIEW + MENU" in out and "PAUSE_KEY  -> SHIFT+F12" in out and "BEEP       -> OFF" in out
+assert "STICKY     -> A, LT" in out and "TURBO      -> B" in out
+saved, _ = run_remap("PAUSE_HOLD=1", "BEEP=ON", "PAUSE_KEY=CTRL+ALT+P", "STICKY=NONE")  # back to defaults
+assert saved == {"link": "wifi", "turbo": ["B"]}, saved
+saved, _ = run_remap("PAUSE_KEY=NONE")
+assert saved["pause_key"] == ""
+before = (cfg / "settings.json").read_text()
+for bad in [("STICKY=B",), ("BEEP=LOUD",), ("PAUSE_KEY=P",), ("TURBO=A", "STICKY=A")]:
+    try:
+        run_remap(*bad)
+        raise AssertionError(f"accepted {bad}")
+    except ValueError:
+        pass
+assert (cfg / "settings.json").read_text() == before         # nothing saved from a rejected change
+saved, _ = run_remap("reset")
+assert saved == {"link": "wifi"}
+print("new settings ok")
 print("ALL OK")
