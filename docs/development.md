@@ -53,6 +53,15 @@ Things that must stay in sync across the two halves:
 - the wire protocol: `pc/protocol.py` and `pico/multiput_pico/protocol.h` (`tests/test_protocol.py` checks them against each other);
 - the settings block: `pc/firmware.py` (`SETTINGS_FORMAT`) and `pico/multiput_pico/settings.h` (both assert its size, 147 bytes).
 
+## Contributing
+**All changes go through a pull request into `main`. Don't push to `main` directly.**
+1. Work on a branch, e.g. `git switch -c fix/bt-reconnect`.
+2. Run `tools/run_tests.sh` (WSL). If you changed the firmware or the installer, run the full build with `tools\build.bat`.
+3. Add your change to the "Unreleased" section of `CHANGELOG.md`.
+4. Push the branch and open a pull request into `main`. Merge it once it's reviewed and the tests pass.
+
+Releases are made from `main` after merging (see [Versioning and releases](#versioning-and-releases)).
+
 ## Overriding setup
 Every setup prompt has a matching option. Anything you leave out is still asked for. Run `multiput --help` for the full list.
 
@@ -117,7 +126,7 @@ multiput uses [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, s
 - the firmware: `tools/build_firmware.sh` compiles it in (`-DMULTIPUT_VERSION=X.Y.Z`; a version like `0.2.0` is a single preprocessor token, so it needs no quoting). The Pico reports it when asked (a `VERSION` request; see `protocol.h`), and multiput compares it with its own version once per Pico session. Firmware 0.1.0 predates this and never answers, so multiput says it's "0.1.0 or older". Builds from the Arduino IDE report `dev`.
 
 **Releasing:**
-1. Move the `CHANGELOG.md` entries from "Unreleased" under a new `## [X.Y.Z] - YYYY-MM-DD` heading, set `VERSION` to `X.Y.Z`, then commit and push to `main`.
+1. In a pull request, move the `CHANGELOG.md` entries from "Unreleased" under a new `## [X.Y.Z] - YYYY-MM-DD` heading and set `VERSION` to `X.Y.Z`. Merge it, then update your local `main` with `git switch main && git pull`.
 2. In WSL, run `tools/release.sh`. It needs the GitHub CLI (`gh`), signed in with push access. It:
    - checks that `VERSION` and the changelog agree, nothing is uncommitted, and `main` matches GitHub;
    - builds and tests everything with `tools\build.bat`;
