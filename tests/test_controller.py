@@ -287,4 +287,29 @@ assert (cfg / "settings.json").read_text() == before         # nothing saved fro
 saved, _ = run_remap("reset")
 assert saved == {"link": "wifi"}
 print("new settings ok")
+
+# Picking the controller: the first connected XInput slot, re-picked if it disconnects;
+# empty slots are scanned at most once a second (slow on some machines); --controller N pins one.
+class Slots:
+    def __init__(self):
+        self.connected, self.calls = set(), []
+    def __call__(self, slot, ptr):
+        self.calls.append(slot)
+        return 0 if slot in self.connected else 1167
+pads, state = Slots(), c.XINPUT_STATE()
+auto = c.ControllerSlot(pads)
+assert not auto.read(state, 0.0) and pads.calls == [0, 1, 2, 3]   # nothing connected: one scan
+pads.calls.clear()
+assert not auto.read(state, 0.5) and pads.calls == []              # no rescan within SCAN_S
+pads.connected = {2}
+assert not auto.read(state, 0.9)                                   # still waiting for the next scan
+assert auto.read(state, 1.0) and auto.current == 2                 # found in slot 2
+pads.calls.clear()
+assert auto.read(state, 1.001) and pads.calls == [2]               # then only that slot is read
+pads.connected = {1}                                               # it disconnects; another appears
+assert auto.read(state, 2.5) and auto.current == 1                 # picked again at once
+pinned = c.ControllerSlot(pads, fixed=3)
+pads.calls.clear()
+assert not pinned.read(state, 5.0) and pads.calls == [3] and pinned.current == 3   # never looks elsewhere
+print("controller auto-pick ok")
 print("ALL OK")

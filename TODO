@@ -14,7 +14,6 @@
 
 Ease of use
 * Start with Windows, or start automatically when the controller connects
-* Auto-pick the first connected controller instead of always XInput slot 0
 * Code signing (removes the "Windows protected your PC" warning and most antivirus false alarms)
 
 Accessibility

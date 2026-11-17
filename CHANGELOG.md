@@ -4,6 +4,10 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-17
+### Changed
+- multiput uses the first connected controller, in any of the four XInput slots, instead of always slot 0. If it disconnects, multiput picks the next one it finds. `--controller N` still pins a slot.
+
 ## [0.4.0] - 2026-11-17
 ### Added
 - Pause with the keyboard: Ctrl+Alt+P pauses or resumes sending to the console, even while a game has focus. Change it with `PAUSE_KEY=` (e.g. `SHIFT+F12`, or `NONE`).

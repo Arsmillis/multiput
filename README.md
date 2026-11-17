@@ -92,9 +92,9 @@ If you try multiput on another console, open an issue with what worked and what 
 ## Use
 Double-click the **multiput** desktop shortcut. A window opens and shows:
 ```
-Sending controller 0 to multiput.local (192.168.1.50:41234). Ctrl+C or close this window to stop.
+Sending the first connected controller to multiput.local (192.168.1.50:41234). Ctrl+C or close this window to stop.
 Pico session started.
-Controller connected.
+Controller connected (slot 0).
 ```
 **Pause the Switch side:** hold **View + Menu** for 1 second, or press **Ctrl+Alt+P** on the keyboard, which works even while a game has focus. You can change the combo, the hold time (down to a single tap) and the shortcut; see [Mapping](#mapping). multiput beeps (low tone), and the Switch sees no buttons pressed until you pause again to resume (high tone). Turn the beep off with `BEEP=OFF`. Your PC game keeps working the whole time, because it reads the controller directly. While a combo is held, its buttons aren't sent to the Switch, so View + Menu doesn't press − and + there.
 

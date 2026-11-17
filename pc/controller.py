@@ -223,6 +223,33 @@ class PauseToggle:
         return False
 
 
+class ControllerSlot:
+    """Which XInput slot (0-3) to read: a fixed one (--controller N), or the first connected
+    controller, picked again if it disconnects. While nothing is connected, slots are scanned
+    at most every SCAN_S: polling empty slots is slow on some Windows machines."""
+    SCAN_S = 1.0
+
+    def __init__(self, get_state, fixed=None):
+        self.get_state, self.fixed = get_state, fixed
+        self.current, self.last_scan = fixed, None
+
+    def read(self, state, now):
+        """Fill `state` from the controller; returns False if none is connected."""
+        if self.fixed is not None:
+            return self.get_state(self.fixed, ctypes.byref(state)) == 0
+        if self.current is not None and self.get_state(self.current, ctypes.byref(state)) == 0:
+            return True
+        self.current = None
+        if self.last_scan is not None and now - self.last_scan < self.SCAN_S:
+            return False
+        self.last_scan = now
+        for slot in range(4):
+            if self.get_state(slot, ctypes.byref(state)) == 0:
+                self.current = slot
+                return True
+        return False
+
+
 NEUTRAL_REPORT = struct.pack("<HBBBBBB", 0, 8, 128, 128, 128, 128, 0)  # nothing pressed
 
 

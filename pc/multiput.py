@@ -34,7 +34,7 @@ import hotkey
 import settings_store as store
 import setup_wizard
 from controller import (DEFAULT_MAP, DEFAULT_PAUSE, NEUTRAL_REPORT, PAUSE_HOLD_S, SWITCH_BUTTONS, TURBO_HZ,
-                        XBOX_BUTTONS, ButtonModes, PauseToggle, XINPUT_STATE, build_report, button_map, button_names,
+                        XBOX_BUTTONS, ButtonModes, ControllerSlot, PauseToggle, XINPUT_STATE, build_report, button_map, button_names,
                         describe_pause, load_xinput, parse_button_list, parse_hold, parse_pause, pause_from_settings,
                         pressed)
 from links import SerialLink, UdpLink, find_bt_port
@@ -59,7 +59,8 @@ def parse_args():
     p.add_argument("--link", choices=["wifi", "bt"],
                    help="use Wi-Fi or Bluetooth to reach the Pico; remembered as the default from now on")
     p.add_argument("--bt", metavar="COMx", help="use this Bluetooth serial port; overrides the saved setting")
-    p.add_argument("--controller", type=int, default=0, choices=range(4), help="XInput controller slot (default 0)")
+    p.add_argument("--controller", type=int, choices=range(4),
+                   help="XInput controller slot 0-3 (default: the first connected controller)")
     p.add_argument("--insecure", action="store_true",
                    help="send unsigned packets (Pico must be set up with --allow-unsigned)")
     p.add_argument("--update", action="store_true",
@@ -349,7 +350,8 @@ def main():
     session = Session(link, key)
     if key is None:
         print("WARNING: sending UNSIGNED packets. Anyone who can reach the Pico can control your Switch.")
-    print(f"Sending controller {args.controller} to {link.name}. Ctrl+C or close this window to stop.")
+    which = "the first connected controller" if args.controller is None else f"controller {args.controller}"
+    print(f"Sending {which} to {link.name}. Ctrl+C or close this window to stop.")
     if saved.get("buttons"):
         changes = ", ".join(f"{x}->{sw}" for x, sw in saved["buttons"].items())
         print(f"Custom button mapping: {changes}.")
@@ -366,6 +368,7 @@ def main():
         print("Waiting for the Pico...")
 
     state = XINPUT_STATE()
+    slot = ControllerSlot(get_state, args.controller)
     last_report, last_sent, connected = None, 0.0, None
     while True:
         now = time.monotonic()
@@ -374,10 +377,10 @@ def main():
             controls = edit_while_running(cfg, saved, controls, session)
             last_report = None  # send the current state with the new settings right away
             continue
-        ok = get_state(args.controller, ctypes.byref(state)) == 0
+        ok = slot.read(state, now)
         if ok != connected:
             connected = ok
-            print("Controller connected." if ok else "Controller not connected; waiting...")
+            print(f"Controller connected (slot {slot.current})." if ok else "Controller not connected; waiting...")
             controls.modes.reset()  # release sticky buttons when the controller goes away
         toggled = controls.hotkey.fired()  # the keyboard shortcut works even without a controller
         if toggled:

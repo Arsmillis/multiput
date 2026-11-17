@@ -51,10 +51,10 @@ The key requirement is the first one. Many cheap boards can't present themselves
 2. Turn on the Xbox controller. Windows and PC games pick it up as usual.
 3. On the PC, double-click the **multiput** desktop shortcut. Its window shows:
    ```
-   Sending controller 0 to multiput.local (192.168.1.50:41234). Ctrl+C or close this window to stop.
+   Sending the first connected controller to multiput.local (192.168.1.50:41234). Ctrl+C or close this window to stop.
    Waiting for the Pico...
    Pico session started.
-   Controller connected.
+   Controller connected (slot 0).
    ```
    The Pico's LED turns **solid**.
 4. On the Switch, the new wired controller works like any wired pad. Press A in a menu and it registers.
