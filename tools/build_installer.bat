@@ -28,6 +28,10 @@ echo Building multiput %VERSION%
 build\venv\Scripts\python -m PyInstaller --noconfirm --log-level WARN --onefile --console --name multiput ^
   --add-data "%CD%\VERSION;." ^
   --paths pc --distpath build\dist --workpath build\work --specpath build pc\multiput.py || exit /b 1
+rem The same program without a console window: runs in the system tray.
+build\venv\Scripts\python -m PyInstaller --noconfirm --log-level WARN --onefile --windowed --name multiputw ^
+  --add-data "%CD%\VERSION;." ^
+  --paths pc --distpath build\dist --workpath build\work --specpath build pc\multiput.py || exit /b 1
 
 call :findiscc
 if not defined ISCC (

@@ -12,7 +12,8 @@ import hmac
 import struct
 import time
 
-from version import firmware_message
+import events
+from version import firmware_message, firmware_ok
 
 HELLO = b"MH"
 SYNC_MAGIC, SYNC_LEN = b"MN", 18   # + nonce[8] + last_counter[8]
@@ -63,7 +64,7 @@ class Session:
                 if self.version_asked is not None and self.firmware_version is None:
                     self.firmware_version = version
                     self.version_asked = -1  # answered
-                    print(firmware_message(version))
+                    events.say(firmware_message(version), events.FIRMWARE_OK if firmware_ok(version) else events.FIRMWARE_UPDATE)
                 continue
             if self.rx[:2] != SYNC_MAGIC:
                 self.rx = self.rx[1:]
@@ -74,13 +75,13 @@ class Session:
             self.rx = self.rx[SYNC_LEN:]
             self.last_heard = now
             if self.lost:
-                print("Reconnected to the Pico.")
+                events.say("Reconnected to the Pico.", events.PICO_UP)
                 self.lost = False
             if nonce != self.nonce:
                 if self.nonce is not None:
-                    print("Pico restarted; new session.")
+                    events.say("Pico restarted; new session.", events.PICO_UP)
                 elif self.counter == 0:
-                    print("Pico session started.")
+                    events.say("Pico session started.", events.PICO_UP)
                 if nonce != self.version_nonce:
                     # a new Pico session: first connection, or it restarted (maybe re-flashed)
                     self.link.send(VERSION_MAGIC)
@@ -93,13 +94,14 @@ class Session:
         if self.version_asked not in (None, -1):
             if now - self.version_asked >= VERSION_TIMEOUT_S:
                 self.version_asked = -1  # no answer to any request: firmware too old to answer
-                print(firmware_message(None))
+                events.say(firmware_message(None), events.FIRMWARE_UPDATE)
             elif self.version_sent is None or now - self.version_sent >= VERSION_RETRY_S:
                 self.link.send(VERSION_MAGIC)
                 self.version_sent = now
         if now - self.last_heard >= LINK_TIMEOUT_S:
             if self.nonce is not None and not self.lost:  # only after having been connected
-                print("Lost contact with the Pico; reconnecting... (inputs on the Switch are released meanwhile)")
+                events.say("Lost contact with the Pico; reconnecting... (inputs on the Switch are released meanwhile)",
+                           events.PICO_LOST)
                 self.lost = True
             started = self.clock()
             self.link.reconnect()

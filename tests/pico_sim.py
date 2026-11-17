@@ -71,6 +71,9 @@ class FakeLink:
         d, self.inbox = self.inbox, b""
         return d
 
+    def close(self):
+        self.closed = True
+
 
 def deliver(link):
     """PC -> Pico as one byte stream (exercises Bluetooth framing); Pico replies go back to the PC."""

@@ -4,6 +4,15 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-17
+### Added
+- multiput runs in the system tray (`multiputw.exe`, opened by the desktop and Start menu shortcuts):
+  - **icon:** a letter on a coloured square: **C** green (connected and sending), **W** orange (waiting, reconnecting, or busy), **P** grey (paused), **F** red (failed); hover for details;
+  - **notifications** for losing and regaining contact with the Pico, pause and resume, a disconnected controller, and outdated Pico firmware;
+  - **menu:** pause, switch link, button mapping (applied as soon as the editor closes), update the Pico, performance test, Pico status, open the log, and quit. Tasks that need the Pico to themselves open in a console window, and the tray reconnects when they finish.
+
+  The console version is still there (Start menu: multiput (console window)). Output from the tray version goes to `%APPDATA%\multiput\multiput.log`.
+
 ## [0.4.1] - 2026-11-17
 ### Changed
 - multiput uses the first connected controller, in any of the four XInput slots, instead of always slot 0. If it disconnects, multiput picks the next one it finds. `--controller N` still pins a slot.

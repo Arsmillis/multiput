@@ -203,7 +203,7 @@ print("setup port detection ok")
 # multiput uses the detected port at startup and saves it if Windows renumbered it.
 import multiput  # noqa: E402
 opened = []
-multiput.SerialLink = lambda port: opened.append(port) or port
+multiput.SerialLink = lambda port, stop=None: opened.append(port) or port
 cfg3 = pathlib.Path(tempfile.mkdtemp())
 saved3 = {"link": "bt", "port": "COM3"}
 store.save_settings(cfg3, saved3)
@@ -226,7 +226,7 @@ print("startup port detection ok")
 
 # --link picks the link for this run and is remembered.
 opened.clear()
-multiput.UdpLink = lambda host: opened.append(("udp", host)) or host
+multiput.UdpLink = lambda host, stop=None: opened.append(("udp", host)) or host
 multiput.find_bt_port = lambda: "COM5"
 cfg4 = pathlib.Path(tempfile.mkdtemp())
 saved4 = {"link": "wifi", "host": "multiput.local", "port": "COM5", "pico_wifi": True}

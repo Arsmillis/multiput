@@ -11,28 +11,40 @@ import socket
 import sys
 import time
 
+import events
+
 PORT = 41234
 RETRY_S = 2.0  # how often to retry reaching the Pico at startup
 # Receive buffer: larger than any UDP datagram. On Windows a datagram bigger than the buffer
 # raises WSAEMSGSIZE and is lost (Linux would truncate it instead).
 MAX_DATAGRAM = 65536
 
-def retry(connect, message):
-    """Call connect() until it succeeds, so multiput can be started before the Pico is up."""
+class Stopped(Exception):
+    """Connecting was abandoned because `stop` was set (the tray app needs the link back)."""
+
+
+def retry(connect, message, stop=None):
+    """Call connect() until it succeeds, so multiput can be started before the Pico is up.
+    stop: a threading.Event that abandons the attempt (raises Stopped)."""
     printed = False
     while True:
+        if stop is not None and stop.is_set():
+            raise Stopped()
         try:
             return connect()
         except OSError:
             if not printed:
-                print(message + " (Ctrl+C to stop)")
+                events.say(message + " (Ctrl+C to stop)", events.INFO)
                 printed = True
-            time.sleep(RETRY_S)
+            if stop is not None:
+                stop.wait(RETRY_S)
+            else:
+                time.sleep(RETRY_S)
 
 class UdpLink:
-    def __init__(self, host):
+    def __init__(self, host, stop=None):
         self.host = host
-        self.addr = (retry(lambda: socket.gethostbyname(host), f"Looking for the Pico at {host}..."), PORT)
+        self.addr = (retry(lambda: socket.gethostbyname(host), f"Looking for the Pico at {host}...", stop), PORT)
         self.name = f"{host} ({self.addr[0]}:{PORT})"
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setblocking(False)
@@ -62,6 +74,9 @@ class UdpLink:
                 return out
             if src[0] == self.addr[0]:
                 out += data
+
+    def close(self):
+        self.sock.close()
 
 BT_NAME = "multiput"  # the name the Pico advertises (pico/multiput_pico/transport_bt.h)
 PAIRED_DEVICES_KEY = r"SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices"
@@ -99,13 +114,13 @@ def find_bt_port():
 
 
 class SerialLink:
-    def __init__(self, port):
+    def __init__(self, port, stop=None):
         try:
             import serial
         except ImportError:
             sys.exit("Bluetooth mode needs pyserial: pip install pyserial")
         self.name, self.serial = port, serial
-        self.ser = retry(self._open, f"Connecting to the Pico over Bluetooth ({port})...")
+        self.ser = retry(self._open, f"Connecting to the Pico over Bluetooth ({port})...", stop)
 
     def _open(self):
         return self.serial.Serial(self.name, timeout=0, write_timeout=1)
@@ -123,6 +138,12 @@ class SerialLink:
             return self.ser.read(256)
         except OSError:
             return b""
+
+    def close(self):
+        try:
+            self.ser.close()
+        except OSError:
+            pass
 
     def reconnect(self):
         try:

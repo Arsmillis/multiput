@@ -15,7 +15,9 @@ multiput/
 │   ├── performance.md      the performance test: how to run it, and measured results
 │   └── development.md      this file
 ├── pc/                     the Windows program (multiput.exe)
-│   ├── multiput.py         entry point: command line, main loop
+│   ├── multiput.py         entry point: command line, main loop (run_loop)
+│   ├── tray.py             the system tray app (multiputw.exe / --tray): icon, menu, notifications
+│   ├── events.py           status messages: printed in the console, shown by the tray
 │   ├── controller.py       reads the Xbox controller (XInput), builds the Switch report, mapping, pause, sticky/turbo
 │   ├── hotkey.py           the system-wide keyboard shortcut for pausing (Windows RegisterHotKey)
 │   ├── protocol.py         signing and the session with the Pico (PC half of protocol.h)
@@ -37,7 +39,7 @@ multiput/
 ├── tools/
 │   ├── build_firmware.sh   builds build/firmware/multiput.uf2 (WSL/Linux)
 │   ├── build.bat           one-step build: firmware + tests (via WSL), then the installer
-│   ├── build_installer.bat builds multiput.exe and the installer (Windows)
+│   ├── build_installer.bat builds multiput.exe, multiputw.exe (tray) and the installer (Windows)
 │   ├── run_tests.sh        runs all the test files (WSL/Linux)
 │   ├── release.sh          publishes or republishes the GitHub release for VERSION (WSL, gh)
 │   ├── release_notes.py    release notes from CHANGELOG.md, with checksums
@@ -50,7 +52,9 @@ multiput/
 │   ├── test_setup.py       .uf2 settings patching and the --setup flow
 │   ├── test_controller.py  button mapping, --remap, pause combos, M-key editing
 │   ├── test_perf.py        the performance test's measuring logic, against a fake Pico
-│   └── test_release.py     release notes generation
+│   ├── test_release.py     release notes generation
+│   ├── test_loop.py        run_loop on a thread with stop and commands, as the tray runs it
+│   └── test_tray.py        the tray's status logic (icon colour, tooltip, notifications)
 └── build/                  everything generated (git-ignored)
 ```
 
@@ -88,6 +92,7 @@ Example: `multiput --setup --link wifi --ssid HomeNet --drive E:\`
 
 ## Overriding at run time
 - `multiput 192.168.1.50`: use this IP instead of the saved address, for networks that block `.local` names.
+- `multiput --tray`: run in the system tray. `multiputw.exe` is the same program built without a console window, which starts the tray automatically; its output goes to `%APPDATA%\multiput\multiput.log`. From source: `pythonw pc\multiput.py --tray`. The tray's tasks run the console program in its own window (`tray.console_command`). For those that need the Pico, the tray first stops its worker and releases the single-instance lock, then takes both back when the window closes.
 - `multiput --update`: update the Pico's firmware (the bundled `firmware/multiput.bin`, or `--firmware FILE.bin`) and optionally its Wi‑Fi network (`--ssid`/`--password` skip the prompts), over the current link. It needs firmware 0.3.0 or newer on the Pico; older firmware gets a USB setup once. Protocol and safety details are in `pico/multiput_pico/ota.h`.
 - `multiput --pico-status`: show the Pico's firmware version and diagnostics text (firmware 0.3.1 and newer): whether it holds Bluetooth pairing keys, and the outcome of the last save before an update and the last restore after one. It's the unsigned `STATUS` request in `protocol.h`, and it contains no key material.
 - `multiput --perf-test`: measure the round trip over each link (see [Performance](performance.md)). It refuses to run alongside multiput; a named mutex (`Local\multiput`) stops two copies running at once.

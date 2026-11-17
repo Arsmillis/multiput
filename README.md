@@ -81,7 +81,7 @@ If you try multiput on another console, open an issue with what worked and what 
    3. When it says *Waiting for the Pico*, hold the **BOOTSEL** button on the Pico, plug it into the PC, then let go. Setup finds it and flashes it, and the Pico restarts by itself.
    4. Setup asks whether to customize the button mapping. Press Enter to keep the default, or type `y` to change buttons or the pause combos (see [Mapping](#mapping)). You can always do this later.
 3. **Plug the Pico into a USB port on the Switch 2 dock.** The Switch sees the controller straight away. Its LED blinks fast while it joins Wi‑Fi, then slowly while it waits for the PC. The Switch 2 needs no setting changed.
-4. **Start multiput.** Back in the setup window, press Enter to start now, or later double-click the **multiput** desktop shortcut. When the window says `Controller connected.` and the Pico's LED is solid, presses go to both devices.
+4. **Start multiput.** Back in the setup window, press Enter to start now, or later double-click the **multiput** desktop shortcut. When the tray icon turns green and the Pico's LED is solid, presses go to both devices.
 
 **Later:**
 - **To update the Pico's firmware or change its Wi‑Fi network, leave it where it is:** close multiput and use **Start menu → multiput update (Pico stays in place)**. The update goes over Wi‑Fi or Bluetooth, whichever multiput uses, and takes a few seconds over Wi‑Fi; then the Pico restarts. Updates keep the Pico's Bluetooth pairing from firmware 0.3.1 on. Updating an older Pico resets it once, and Windows re-pairs by itself, which takes a minute or two. If the Pico has no Wi‑Fi yet, or can't reach its network, switch to Bluetooth first (`multiput --link bt`).
@@ -90,7 +90,27 @@ If you try multiput on another console, open an issue with what worked and what 
 - To uninstall, go to Settings → Apps → Installed apps → multiput → Uninstall. Your key and settings stay in `%APPDATA%\multiput`; delete that folder too if you won't reinstall.
 
 ## Use
-Double-click the **multiput** desktop shortcut. A window opens and shows:
+Double-click the **multiput** desktop shortcut. multiput starts in the **system tray**, next to the clock; you may need to click ^ to see its icon. The icon is a letter on a coloured square:
+- **C** (green): connected, and sending your controller to the console.
+- **W** (orange): waiting: looking for the Pico, reconnecting, no controller connected, or busy in another window. Hover over the icon to see which.
+- **P** (grey): paused.
+- **F** (red): failed: multiput stopped with an error. Hover to read it, then use the menu, for example to switch link.
+
+Notifications tell you when multiput loses or regains contact with the Pico, when you pause or resume, when the controller disconnects, and when the Pico's firmware should be updated.
+
+**Click the icon** for the menu:
+- Pause / Resume
+- Link ▸ Wi‑Fi / Bluetooth
+- Button mapping
+- Update the Pico
+- Performance test
+- Pico status
+- Open log
+- Quit
+
+Tasks that need the Pico to themselves (update, performance test, status) open in a console window. multiput reconnects by itself when you close that window.
+
+**Prefer a console window?** Use **Start menu → multiput (console window)**. It shows the same messages as text:
 ```
 Sending the first connected controller to multiput.local (192.168.1.50:41234). Ctrl+C or close this window to stop.
 Pico session started.
@@ -100,11 +120,11 @@ Controller connected (slot 0).
 
 **Firmware version:** when it connects, multiput shows the Pico's firmware version, and tells you if it's older than multiput and how to update it (normally **multiput update**, with the Pico staying where it is).
 
-**Change the mapping without restarting:** press **M** in the multiput window (see [Mapping](#mapping)).
+**Change the mapping without restarting:** use **Button mapping** in the tray menu, or press **M** in the console window (see [Mapping](#mapping)).
 
-Close the window to stop. You can start multiput before the Pico is plugged in. It shows `Looking for the Pico at multiput.local...` or `Waiting for the Pico...` until it finds it.
+To stop, choose **Quit** in the tray menu, or close the console window. You can start multiput before the Pico is plugged in; it keeps looking until it finds it.
 
-If the Pico drops out mid-session, the window shows `Lost contact with the Pico; reconnecting...` and then `Reconnected to the Pico.` on its own. Meanwhile the PC game keeps working, and the Switch side releases all inputs.
+If the Pico drops out mid-session, multiput says it lost contact, then that it reconnected, on its own. Meanwhile the PC game keeps working, and the Switch side releases all inputs.
 
 The Pico's LED:
 - **Blinking fast:** joining Wi‑Fi. If it never stops, the Wi‑Fi name or password is wrong: run setup again. (Bluetooth still works meanwhile.)
@@ -123,7 +143,7 @@ Every packet is signed with a key that only your PC and your Pico have (HMAC‑S
 ## Mapping
 Buttons map by label by default (Xbox A → Switch A, B → B, X → X, Y → Y). LB/RB → L/R, LT/RT → ZL/ZR, View → −, Menu → +, stick clicks → stick clicks, Xbox button → Home.
 
-**Remapping:** while multiput is running, click its window and press **M**. Otherwise, open **Start menu → multiput button mapping** (or run `multiput --remap`). It shows the current mapping and lets you type changes until you press Enter on an empty line. Changes are saved straight away. With **M**, they also take effect immediately; the Switch gets no input while the editor is open. Otherwise they're used the next time multiput starts.
+**Remapping:** while multiput is running, choose **Button mapping** in the tray menu, or press **M** in the console window. Otherwise, open **Start menu → multiput button mapping** (or run `multiput --remap`). It shows the current mapping and lets you type changes until you press Enter on an empty line. Changes are saved straight away. With **M**, they also take effect immediately; the Switch gets no input while the editor is open. Otherwise they're used the next time multiput starts.
 
 Changes are `XBOX=SWITCH` pairs, plus `PAUSE=` for the pause combos and the settings below. Put several changes on one line separated by spaces. In `PAUSE=`, join the buttons of a combo with `+`, and list alternative combos with `,`: holding any one of them pauses or resumes, so you can keep one that suits each game. If any change on a line is invalid, none of them are applied.
 ```

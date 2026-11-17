@@ -20,6 +20,7 @@ Bluetooth), setup_wizard + firmware (--setup), settings_store (key and settings)
 
 import argparse
 import ctypes
+import subprocess
 import sys
 import threading
 import time
@@ -30,6 +31,7 @@ except ImportError:
     msvcrt = None
 from pathlib import Path
 
+import events
 import hotkey
 import settings_store as store
 import setup_wizard
@@ -63,6 +65,8 @@ def parse_args():
                    help="XInput controller slot 0-3 (default: the first connected controller)")
     p.add_argument("--insecure", action="store_true",
                    help="send unsigned packets (Pico must be set up with --allow-unsigned)")
+    p.add_argument("--tray", action="store_true",
+                   help="run in the system tray (what multiputw.exe does) instead of this console window")
     p.add_argument("--update", action="store_true",
                    help="update the Pico's firmware (and optionally its Wi-Fi network) over the air, "
                         "while it stays in the dock; close multiput first")
@@ -78,6 +82,7 @@ def parse_args():
     s = p.add_argument_group("setup options (skip the matching --setup prompts)")
     s.add_argument("--setup", action="store_true", help="configure and flash the Pico")
     s.add_argument("--no-wifi", action="store_true", help="don't set up Wi-Fi on the Pico (Bluetooth only)")
+    s.add_argument("--no-start", action="store_true", help="exit after setup instead of starting multiput")
     s.add_argument("--ssid", help="Wi-Fi network name")
     s.add_argument("--password", help="Wi-Fi password (prefer the hidden prompt: this ends up in shell history)")
     s.add_argument("--port", metavar="COMx", help="Bluetooth COM port to save")
@@ -89,11 +94,12 @@ def parse_args():
                    help="make the Pico also accept unsigned packets (not recommended)")
     return p.parse_args()
 
-def open_link(args, cfg, saved):
+def open_link(args, cfg, saved, stop=None):
+    """The link to the Pico. stop (threading.Event): abandon connecting (links.Stopped)."""
     if args.bt:
-        return SerialLink(args.bt)
+        return SerialLink(args.bt, stop)
     if args.host:
-        return UdpLink(args.host)
+        return UdpLink(args.host, stop)
     link = args.link or saved.get("link", "wifi")
     if link != saved.get("link"):
         saved["link"] = link
@@ -109,10 +115,10 @@ def open_link(args, cfg, saved):
             print(f"Using {port} (the paired Pico's port; saved for next time).")
             saved["port"] = port
             store.save_settings(cfg, saved)
-        return SerialLink(port)
+        return SerialLink(port, stop)
     if saved.get("pico_wifi") is False:
         raise SystemExit("The Pico was set up without Wi-Fi. Use --link bt, or run multiput --setup to add Wi-Fi.")
-    return UdpLink(saved.get("host", "multiput.local"))
+    return UdpLink(saved.get("host", "multiput.local"), stop)
 
 # Control settings besides the button mapping, with their defaults (saved only when changed).
 SETTING_DEFAULTS = {"pause_hold": PAUSE_HOLD_S, "pause_key": hotkey.DEFAULT, "beep": True, "sticky": [], "turbo": []}
@@ -284,13 +290,22 @@ def claim_single_instance():
     counter (and Bluetooth allows one program per COM port). The mutex is released when
     the process exits."""
     global _instance_mutex
-    if sys.platform != "win32":
+    if sys.platform != "win32" or _instance_mutex:  # not Windows, or this process already holds it
         return
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateMutexW.restype = ctypes.c_void_p
     _instance_mutex = kernel32.CreateMutexW(None, False, "Local\\multiput")
     if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+        _instance_mutex = None
         raise SystemExit("multiput is already running (another window, or the performance test). Close it first.")
+
+
+def release_single_instance():
+    """Let another multiput talk to the Pico (the tray app hands the link to the console)."""
+    global _instance_mutex
+    if _instance_mutex:
+        ctypes.WinDLL("kernel32").CloseHandle(ctypes.c_void_p(_instance_mutex))
+        _instance_mutex = None
 
 
 def main():
@@ -300,6 +315,10 @@ def main():
     if cfg == store.default_dir() and (old := store.migrate_old_dir(cfg)):
         print(f"Moved your key and settings from {old} to {cfg} (minput is now called multiput).")
     saved = store.load_settings(cfg)
+    if args.tray or (FROZEN and sys.stdout is None):  # multiputw.exe has no console
+        import tray
+        tray.main(args, cfg, store, sys.modules[__name__])
+        return
     if args.remap is not None:
         remap(args, cfg, saved)
         return
@@ -339,71 +358,108 @@ def main():
         saved = store.load_settings(cfg)
         if input("\nCustomize the button mapping now? (y/N): ").strip().lower().startswith("y"):
             edit_mapping(cfg, saved)
+        if args.no_start:  # started by the tray app, which carries on by itself
+            return
+        tray_exe = Path(sys.executable).with_name("multiputw.exe")
+        if FROZEN and tray_exe.exists():
+            input("\nPress Enter to start multiput in the system tray (or close this window to start it later)... ")
+            subprocess.Popen([str(tray_exe)], creationflags=subprocess.DETACHED_PROCESS)
+            return
         input("\nPress Enter to start multiput now (or close this window to start it later)... ")
 
     saved = saved or {}
     claim_single_instance()
-    key = None if args.insecure else store.load_key(cfg)
+    run_loop(args, cfg, saved, None if args.insecure else store.load_key(cfg), keyboard=msvcrt)
+
+
+def run_loop(args, cfg, saved, key, stop=None, commands=None, keyboard=None, get_state=None):
+    """Mirror the controller to the Pico until `stop` (threading.Event) is set.
+    commands: a queue.Queue of "pause" (toggle, like the keyboard shortcut) and "reload"
+    (settings changed on disk, e.g. by the mapping editor). keyboard: msvcrt in the console
+    (M opens the mapping editor); None in the tray. Status goes through events.say()."""
     controls = Controls(saved)
-    get_state = load_xinput()
-    link = open_link(args, cfg, saved)
+    get_state = get_state or load_xinput()
+    link = open_link(args, cfg, saved, stop)
     session = Session(link, key)
     if key is None:
-        print("WARNING: sending UNSIGNED packets. Anyone who can reach the Pico can control your Switch.")
+        events.say("WARNING: sending UNSIGNED packets. Anyone who can reach the Pico can control your Switch.",
+                   events.WARNING)
     which = "the first connected controller" if args.controller is None else f"controller {args.controller}"
-    print(f"Sending {which} to {link.name}. Ctrl+C or close this window to stop.")
+    events.say(f"Sending {which} to {link.name}." + (" Ctrl+C or close this window to stop." if keyboard else ""))
     if saved.get("buttons"):
         changes = ", ".join(f"{x}->{sw}" for x, sw in saved["buttons"].items())
-        print(f"Custom button mapping: {changes}.")
+        events.say(f"Custom button mapping: {changes}.")
     if controls.pause.combos or controls.hotkey.active:
-        print(f"Pause/resume sending to the Switch: {controls.describe_pause(saved)}.")
+        events.say(f"Pause/resume sending to the Switch: {controls.describe_pause(saved)}.")
     if controls.hotkey.error:
-        print(f"Keyboard shortcut not available: {controls.hotkey.error}. Change it with PAUSE_KEY (press M).")
+        events.say(f"Keyboard shortcut not available: {controls.hotkey.error}. Change it with PAUSE_KEY.", events.WARNING)
     if controls.modes.sticky or controls.modes.turbo:
-        print("Sticky: " + (", ".join(sorted(controls.modes.sticky)) or "none") +
-              f" | Turbo: " + (", ".join(sorted(controls.modes.turbo)) or "none") + ".")
-    if msvcrt:
-        print("Press M in this window to change the button mapping.")
+        events.say("Sticky: " + (", ".join(sorted(controls.modes.sticky)) or "none") +
+                   " | Turbo: " + (", ".join(sorted(controls.modes.turbo)) or "none") + ".")
+    if keyboard:
+        events.say("Press M in this window to change the button mapping.")
     if not session.ready:
-        print("Waiting for the Pico...")
+        events.say("Waiting for the Pico...")
 
     state = XINPUT_STATE()
     slot = ControllerSlot(get_state, args.controller)
     last_report, last_sent, connected = None, 0.0, None
-    while True:
-        now = time.monotonic()
-        session.poll(now)
-        if msvcrt and msvcrt.kbhit() and msvcrt.getwch().lower() == "m":
-            controls = edit_while_running(cfg, saved, controls, session)
-            last_report = None  # send the current state with the new settings right away
-            continue
-        ok = slot.read(state, now)
-        if ok != connected:
-            connected = ok
-            print(f"Controller connected (slot {slot.current})." if ok else "Controller not connected; waiting...")
-            controls.modes.reset()  # release sticky buttons when the controller goes away
-        toggled = controls.hotkey.fired()  # the keyboard shortcut works even without a controller
-        if toggled:
-            controls.pause.toggle()
-        down = pressed(state.Gamepad) if ok else set()
-        if (ok and controls.pause.update(down, now)) or toggled:
-            print(f"Paused: the Switch gets no input (the PC still does). To resume: {controls.describe_pause(saved)}."
-                  if controls.pause.paused else "Resumed: sending to the Switch again.")
-            beep(controls.pause.paused, controls.beep)
-        if not ok:
-            time.sleep(POLL_S)  # no packets: the Pico releases everything after its timeout
-            continue
-        held = controls.modes.apply(down, now)
-        if controls.pause.paused:
-            report = NEUTRAL_REPORT  # still sent, so the link stays alive
-        else:
-            # While a pause combo is held, keep its buttons off the Switch.
-            report = build_report(state.Gamepad, controls.mapping, controls.pause.held_buttons(down), held)
-        # Send on any change (turbo changes the report while the controller is still) and as a keepalive.
-        if session.ready and (report != last_report or now - last_sent >= KEEPALIVE_S):
-            session.send(report)
-            last_report, last_sent = report, now
-        time.sleep(POLL_S)
+    try:
+        while not (stop and stop.is_set()):
+            now = time.monotonic()
+            session.poll(now)
+            toggled = controls.hotkey.fired()  # the keyboard shortcut works even without a controller
+            while commands is not None and not commands.empty():
+                command = commands.get_nowait()
+                if command == "pause":
+                    toggled = not toggled
+                elif command == "reload":  # e.g. the tray's mapping editor saved new settings
+                    fresh = store.load_settings(cfg) or {}
+                    saved.clear()
+                    saved.update(fresh)  # the file is the source of truth
+                    controls = Controls(saved, controls)
+                    last_report = None
+            if keyboard and keyboard.kbhit() and keyboard.getwch().lower() == "m":
+                controls = edit_while_running(cfg, saved, controls, session)
+                last_report = None  # send the current state with the new settings right away
+                continue
+            ok = slot.read(state, now)
+            if ok != connected:
+                if ok:
+                    events.say(f"Controller connected (slot {slot.current}).", events.CONTROLLER_UP)
+                else:
+                    events.say("Controller not connected; waiting...", events.CONTROLLER_LOST)
+                connected = ok
+                controls.modes.reset()  # release sticky buttons when the controller goes away
+            if toggled:
+                controls.pause.toggle()
+            down = pressed(state.Gamepad) if ok else set()
+            if (ok and controls.pause.update(down, now)) or toggled:
+                if controls.pause.paused:
+                    events.say(f"Paused: the Switch gets no input (the PC still does). To resume: "
+                               f"{controls.describe_pause(saved)}.", events.PAUSED)
+                else:
+                    events.say("Resumed: sending to the Switch again.", events.RESUMED)
+                beep(controls.pause.paused, controls.beep)
+            if not ok:
+                time.sleep(POLL_S)  # no packets: the Pico releases everything after its timeout
+                continue
+            held = controls.modes.apply(down, now)
+            if controls.pause.paused:
+                report = NEUTRAL_REPORT  # still sent, so the link stays alive
+            else:
+                # While a pause combo is held, keep its buttons off the Switch.
+                report = build_report(state.Gamepad, controls.mapping, controls.pause.held_buttons(down), held)
+            # Send on any change (turbo changes the report while the controller is still) and as a keepalive.
+            if session.ready and (report != last_report or now - last_sent >= KEEPALIVE_S):
+                session.send(report)
+                last_report, last_sent = report, now
+            time.sleep(POLL_S)
+    finally:
+        if session.ready:
+            session.send(NEUTRAL_REPORT)  # leave nothing pressed on the console
+        link.close()
+        controls.hotkey.stop()
 
 
 def run():
@@ -426,7 +482,7 @@ def run():
     except (OSError, ValueError) as e:  # e.g. Pico drive or Bluetooth link lost, bad firmware file
         print(f"Error: {e}", file=sys.stderr)
         code = 1
-    if code and FROZEN:
+    if code and FROZEN and sys.stdin is not None:  # multiputw.exe has no console to wait in
         input("Press Enter to close... ")
     sys.exit(code)
 

@@ -1,6 +1,4 @@
 * Better UI
-  - Tray app instead of the console window: status icon (connected / paused / lost), menu for pause, link, mapping, perf test, quit
-  - Windows notifications for lost / reconnected / paused (Narrator reads them aloud)
   - Mapping by pressing buttons ("press the Xbox button to change, then pick the Switch button") instead of typing names
 * Running on MacOS & Linux
   - Only XInput, the Windows Bluetooth COM-port detection and the installer are Windows-specific; protocol and links are portable

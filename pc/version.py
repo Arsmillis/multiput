@@ -46,3 +46,11 @@ def firmware_message(firmware, app=VERSION):
     if fw > mine:
         return f"Pico firmware {firmware} is newer than this multiput ({app}): update multiput."
     return f"Pico firmware {firmware} (up to date)."
+
+
+def firmware_ok(firmware, app=VERSION):
+    """True when the Pico's firmware matches this multiput (or is a development build)."""
+    fw, mine = parse(firmware) if firmware else None, parse(app)
+    if firmware is None:
+        return False
+    return fw is None or mine is None or fw == mine
