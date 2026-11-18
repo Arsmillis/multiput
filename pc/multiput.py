@@ -36,9 +36,9 @@ import hotkey
 import settings_store as store
 import setup_wizard
 from controller import (DEFAULT_MAP, DEFAULT_PAUSE, NEUTRAL_REPORT, PAUSE_HOLD_S, SWITCH_BUTTONS, TURBO_HZ,
-                        XBOX_BUTTONS, ButtonModes, ControllerSlot, PauseToggle, XINPUT_STATE, build_report, button_map, button_names,
-                        describe_pause, load_xinput, parse_button_list, parse_hold, parse_pause, pause_from_settings,
-                        pressed)
+                        XBOX_BUTTONS, XINPUT_STATE, ButtonCapture, ButtonModes, ComboCapture, ControllerSlot,
+                        PauseToggle, build_report, button_map, button_names, describe_pause, held_buttons_reader,
+                        load_xinput, parse_button_list, parse_hold, parse_pause, pause_from_settings, pressed)
 from links import SerialLink, UdpLink, find_bt_port
 from perf import run_perf_test
 from updater import connect, pico_status, run_update
@@ -197,23 +197,126 @@ def print_mapping(saved):
     print(f"TURBO      -> {', '.join(setting(saved, 'turbo')) or 'none'}  ({TURBO_HZ} presses/s while held){changed('turbo')}")
 
 
-def edit_mapping(cfg, saved):
-    """Interactive editor: used by `multiput --remap` and offered at the end of setup."""
+CAPTURE_TIMEOUT_S = 30
+
+
+def wait_for_buttons(capture, read, keyboard):
+    """Feed controller readings to a ComboCapture until it has a result.
+    None if cancelled (Esc or Enter on the keyboard) or after CAPTURE_TIMEOUT_S."""
+    deadline, warned = time.monotonic() + CAPTURE_TIMEOUT_S, False
+    while time.monotonic() < deadline:
+        if keyboard and keyboard.kbhit() and keyboard.getwch() in ("\x1b", "\r"):
+            return None
+        down = read()
+        if down is None:
+            if not warned:
+                print("  (No controller connected yet: connect one, or press Esc to cancel.)")
+                warned = True
+            down = set()
+        result = capture.feed(down)
+        if result:
+            return result
+        time.sleep(0.01)
+    print("  Timed out.")
+    return None
+
+
+def line_or_button(prompt, read, keyboard):
+    """The editor's prompt: returns (typed line, None), or (None, Xbox button) when a button is
+    pressed on the controller first. Without a controller reader or console keyboard (not
+    Windows), it's a plain input()."""
+    if not (read and keyboard):
+        return input(prompt), None
+    print(prompt, end="", flush=True)
+    capture, typed = ButtonCapture(), []
+    while True:
+        while keyboard.kbhit():
+            ch = keyboard.getwch()
+            if ch == "\r":
+                print()
+                return "".join(typed), None
+            if ch == "\x03":
+                raise KeyboardInterrupt
+            if ch in ("\x00", "\xe0"):   # arrow and function keys come as two characters: ignored
+                keyboard.getwch()
+            elif ch == "\b":
+                if typed:
+                    typed.pop()
+                    print("\b \b", end="", flush=True)
+            elif ch.isprintable():
+                typed.append(ch)
+                print(ch, end="", flush=True)
+        button = capture.feed(read() or set())
+        if button and not typed:   # a press while typing a line doesn't interrupt it
+            print(button)
+            return None, button
+        time.sleep(0.01)
+
+
+def map_pressed_button(cfg, saved, xbox):
+    """A controller button pressed at the editor's prompt: pick what it sends on the Switch."""
+    targets = list(SWITCH_BUTTONS)
+    current = button_names(saved.get("buttons", {}))[xbox]
+    print(f"{xbox} sends {current} on the Switch. Pick what it should send:")
+    print("  " + "  ".join(f"{n}={name}" for n, name in enumerate(targets, 1)))
+    choice = input("Number or name (Enter to keep it): ").strip().upper()
+    if not choice:
+        return
+    target = targets[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(targets) else choice
+    update_mapping(saved, [f"{xbox}={target}"])   # ValueError for an unknown name: the editor shows it
+    store.save_settings(cfg, saved)
+
+
+def record_pause(cfg, saved, read, keyboard):
+    """P in the editor: record a pause combo by pressing it."""
+    print("\nHold the buttons for a pause combo together, then let go (Esc or Enter on the keyboard to cancel)...")
+    combo = wait_for_buttons(ComboCapture(), read, keyboard)
+    if not combo:
+        return
+    current = pause_combos(saved)
+    print(f"Recorded {' + '.join(combo)}. Pause is now: {describe_pause(current, setting(saved, 'pause_hold'))}.")
+    if current:
+        how = input("Add it as another pause combo, or replace the current ones? (A/r): ").strip().lower() or "a"
+    else:
+        how = "r"
+    combos = [list(combo)] if how.startswith("r") else [list(c) for c in current] + [list(combo)]
+    update_mapping(saved, ["PAUSE=" + ",".join("+".join(c) for c in combos)])
+    store.save_settings(cfg, saved)
+
+
+def edit_mapping(cfg, saved, read=None, keyboard=msvcrt):
+    """Interactive editor: used by `multiput --remap`, the M key, the tray, and setup.
+    Typed changes, or a button pressed on the controller to remap it; P records a pause combo.
+    read: the controller reader (controller.held_buttons_reader by default); keyboard: msvcrt."""
+    if read is None and keyboard:
+        try:
+            read = held_buttons_reader()
+        except (OSError, AttributeError):  # no XInput
+            pass
     print_mapping(saved)
     print(f"\nXbox names:   {' '.join(XBOX_BUTTONS)}")
     print(f"Switch names: {' '.join(SWITCH_BUTTONS)}")
     print("Examples: A=B B=A | PAUSE=VIEW+MENU,XBOX | PAUSE_HOLD=0 (tap) | PAUSE_KEY=CTRL+ALT+P or NONE")
     print("          BEEP=OFF | STICKY=A,LT | TURBO=B | reset (everything back to the default)")
+    pressing = read and keyboard
+    if pressing:
+        print("Or press a button on the controller to remap it, or type P to record a pause combo.")
     while True:
-        line = input("\nChanges, or Enter to finish: ").strip()
-        if not line:
-            return
+        prompt = "\nType changes, press a button, P, or Enter to finish: " if pressing else "\nChanges, or Enter to finish: "
+        line, button = line_or_button(prompt, read, keyboard)
         try:
-            update_mapping(saved, line.split())
+            if button:
+                map_pressed_button(cfg, saved, button)
+            elif not line.strip():
+                return
+            elif pressing and line.strip().upper() == "P":
+                record_pause(cfg, saved, read, keyboard)
+            else:
+                update_mapping(saved, line.split())
+                store.save_settings(cfg, saved)
         except ValueError as e:
             print(f"  {e}")
             continue
-        store.save_settings(cfg, saved)
         print()
         print_mapping(saved)
 
@@ -374,8 +477,8 @@ def main():
 
 def run_loop(args, cfg, saved, key, stop=None, commands=None, keyboard=None, get_state=None):
     """Mirror the controller to the Pico until `stop` (threading.Event) is set.
-    commands: a queue.Queue of "pause" (toggle, like the keyboard shortcut) and "reload"
-    (settings changed on disk, e.g. by the mapping editor). keyboard: msvcrt in the console
+    commands: a queue.Queue of "pause" (toggle, like the keyboard shortcut; the tray's Pause
+    item). keyboard: msvcrt in the console
     (M opens the mapping editor); None in the tray. Status goes through events.say()."""
     controls = Controls(saved)
     get_state = get_state or load_xinput()
@@ -413,12 +516,6 @@ def run_loop(args, cfg, saved, key, stop=None, commands=None, keyboard=None, get
                 command = commands.get_nowait()
                 if command == "pause":
                     toggled = not toggled
-                elif command == "reload":  # e.g. the tray's mapping editor saved new settings
-                    fresh = store.load_settings(cfg) or {}
-                    saved.clear()
-                    saved.update(fresh)  # the file is the source of truth
-                    controls = Controls(saved, controls)
-                    last_report = None
             if keyboard and keyboard.kbhit() and keyboard.getwch().lower() == "m":
                 controls = edit_while_running(cfg, saved, controls, session)
                 last_report = None  # send the current state with the new settings right away

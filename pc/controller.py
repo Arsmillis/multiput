@@ -8,6 +8,7 @@ to the Switch unchanged.
 
 import ctypes
 import struct
+import time
 
 TRIGGER_THRESHOLD = 30  # 0-255; analog trigger -> digital ZL/ZR
 
@@ -248,6 +249,52 @@ class ControllerSlot:
                 self.current = slot
                 return True
         return False
+
+
+class ButtonCapture:
+    """Press-to-map: waits for one Xbox button press. Buttons already held when it starts
+    must be released first, so what you were holding (e.g. to open the menu) doesn't count."""
+
+    def __init__(self):
+        self.armed, self.prev = False, set()
+
+    def feed(self, down):
+        """Feed the held buttons each poll; returns the pressed button's name, or None."""
+        if not self.armed:
+            self.armed = not down
+            return None
+        new = down - self.prev
+        self.prev = set(down)
+        return next((name for name in XBOX_BUTTONS if name in new), None)
+
+
+class ComboCapture:
+    """Press-to-record a combo: everything held together, finished when all are released.
+    As with ButtonCapture, buttons held when it starts must be released first."""
+
+    def __init__(self):
+        self.armed, self.combo = False, set()
+
+    def feed(self, down):
+        """Feed the held buttons each poll; returns the combo (Xbox names) once released, or None."""
+        if not self.armed:
+            self.armed = not down
+            return None
+        if down:
+            self.combo |= down
+            return None
+        return tuple(name for name in XBOX_BUTTONS if name in self.combo) or None
+
+
+def held_buttons_reader(get_state=None):
+    """read() -> the Xbox buttons held on the first connected controller, or None if none is."""
+    get_state = get_state or load_xinput()
+    slot, state = ControllerSlot(get_state), XINPUT_STATE()
+
+    def read():
+        return pressed(state.Gamepad) if slot.read(state, time.monotonic()) else None
+
+    return read
 
 
 NEUTRAL_REPORT = struct.pack("<HBBBBBB", 0, 8, 128, 128, 128, 128, 0)  # nothing pressed

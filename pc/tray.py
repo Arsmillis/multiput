@@ -365,28 +365,29 @@ class TrayApp:
             self.worker = None
         self.mp.release_single_instance()
 
-    def run_console(self, args, needs_pico, then=None):
-        """Run the console multiput in its own window; with needs_pico, hand over the link."""
+    def run_console(self, args):
+        """Run a console multiput task (mapping editor, update, ...) in its own window. The
+        loop stops meanwhile: the task may need the Pico, and the Switch shouldn't get the
+        buttons pressed in the mapping editor. It restarts afterwards with the saved settings."""
         if self.busy:
             return
         self.busy = args[0]
-        if needs_pico:
-            self.stop_worker()
-            self.state = TrayState(self.state.link_name)
-            self.state.busy = True
-            self.icon.refresh(self.state.badge(), self.state.tooltip())
+        was_paused = self.state.paused
+        self.stop_worker()
+        self.state = TrayState(self.state.link_name)
+        self.state.busy = True
+        self.icon.refresh(self.state.badge(), self.state.tooltip())
 
         def wait():
             try:
                 subprocess.run(console_command(*args), creationflags=subprocess.CREATE_NEW_CONSOLE)
             finally:
                 self.busy = None
-                if needs_pico:  # the Pico is back: a fresh state (not busy), shown until the loop reports in
-                    self.state = TrayState(self.state.link_name)
-                    self.icon.refresh(self.state.badge(), self.state.tooltip())
-                    self.start_worker()
-                if then:
-                    then()
+                self.state = TrayState(self.state.link_name)  # not busy: shown until the loop reports in
+                self.icon.refresh(self.state.badge(), self.state.tooltip())
+                self.start_worker()
+                if was_paused:  # stay paused across the restart
+                    self.commands.put("pause")
 
         threading.Thread(target=wait, daemon=True).start()
 
@@ -424,14 +425,14 @@ class TrayApp:
             self.commands.put("pause")
         elif command in (LINK_WIFI, LINK_BT):
             self.switch_link("wifi" if command == LINK_WIFI else "bt")
-        elif command == MAPPING:  # doesn't need the Pico; reload when the editor closes
-            self.run_console(["--remap"], needs_pico=False, then=lambda: self.commands.put("reload"))
+        elif command == MAPPING:
+            self.run_console(["--remap"])
         elif command == UPDATE:
-            self.run_console(["--update"], needs_pico=True)
+            self.run_console(["--update"])
         elif command == PERF:
-            self.run_console(["--perf-test"], needs_pico=True)
+            self.run_console(["--perf-test"])
         elif command == STATUS:
-            self.run_console(["--pico-status"], needs_pico=True)
+            self.run_console(["--pico-status"])
         elif command == LOG:
             os.startfile(self.log_path)
         elif command == QUIT:

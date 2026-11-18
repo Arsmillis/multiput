@@ -77,12 +77,6 @@ commands.put("pause")
 wait_for(lambda: events.RESUMED in kinds(), "resumed")
 print("pause command ok")
 
-saved_on_disk = dict(saved, buttons={"A": "B"})        # the tray's mapping editor saved a change
-store.save_settings(cfg, saved_on_disk)
-commands.put("reload")
-wait_for(lambda: any(c.struct.unpack_from("<H", r)[0] == c.S_B for r in reports()), "A now sending B")
-print("reload command ok")
-
 stop.set()                                             # the tray needs the link (update, quit)
 worker.join(2)
 assert not worker.is_alive() and getattr(link, "closed", False)

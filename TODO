@@ -1,5 +1,4 @@
 * Better UI
-  - Mapping by pressing buttons ("press the Xbox button to change, then pick the Switch button") instead of typing names
 * Running on MacOS & Linux
   - Only XInput, the Windows Bluetooth COM-port detection and the installer are Windows-specific; protocol and links are portable
 * Support more controllers -- currently assumes XBox controller inputs (XInput)

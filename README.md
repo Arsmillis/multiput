@@ -145,6 +145,8 @@ Buttons map by label by default (Xbox A → Switch A, B → B, X → X, Y → Y)
 
 **Remapping:** while multiput is running, choose **Button mapping** in the tray menu, or press **M** in the console window. Otherwise, open **Start menu → multiput button mapping** (or run `multiput --remap`). It shows the current mapping and lets you type changes until you press Enter on an empty line. Changes are saved straight away. With **M**, they also take effect immediately; the Switch gets no input while the editor is open. Otherwise they're used the next time multiput starts.
 
+**Prefer pressing to typing?** With the editor open, press the Xbox button you want to change on the controller, then pick what it should send from a numbered list. To record a pause combo, type **P**, hold the combo on the controller, and let go (Esc cancels). The console gets no input while the editor is open.
+
 Changes are `XBOX=SWITCH` pairs, plus `PAUSE=` for the pause combos and the settings below. Put several changes on one line separated by spaces. In `PAUSE=`, join the buttons of a combo with `+`, and list alternative combos with `,`: holding any one of them pauses or resumes, so you can keep one that suits each game. If any change on a line is invalid, none of them are applied.
 ```
 A=B B=A X=Y Y=X      map by position instead of by label

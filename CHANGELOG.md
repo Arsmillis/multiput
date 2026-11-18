@@ -4,6 +4,16 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-18
+### Added
+- Mapping by pressing buttons: in the mapping editor (tray menu, Start menu, M key, or `multiput --remap`):
+  - press a button on the controller to remap it, then pick what it sends from a numbered list (typing changes still works at the same prompt);
+  - type **P**, then hold a pause combo on the controller and let go to record it, as another combo or replacing the current ones.
+
+  Buttons already held when the editor opens are ignored until released.
+### Changed
+- The tray's Button mapping now stops sending to the console while the editor is open (as the M key already did), so buttons pressed to remap them don't reach the console. A pause that was on stays on afterwards, also after Update, Performance test and Pico status.
+
 ## [0.5.1] - 2026-11-18
 ### Fixed
 - The tray icon stayed on "W" (busy) after Update the Pico, Performance test or Pico status finished, even once input was reaching the console again.

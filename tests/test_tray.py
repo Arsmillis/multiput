@@ -80,6 +80,7 @@ print("badges ok")
 import threading
 app = object.__new__(tray.TrayApp)
 app.state, app.icon, app.busy = tray.TrayState("Wi-Fi"), FakeIcon(), None
+app.commands = __import__("queue").Queue()
 app.stop_worker = lambda: None
 restarted = threading.Event()
 app.start_worker = restarted.set
@@ -88,11 +89,22 @@ def fake_console(cmd, creationflags=0):
     assert app.state.badge() == ("W", tray.AMBER) and app.state.busy  # busy while the task runs
     console_done.set()
 tray.subprocess.run, tray.subprocess.CREATE_NEW_CONSOLE = fake_console, 0
-app.run_console(["--update"], needs_pico=True)
+app.run_console(["--update"])
 assert restarted.wait(2) and console_done.is_set()
 assert not app.state.busy and app.busy is None
 for text, kind in [("Pico session started.", events.PICO_UP), ("Controller connected (slot 0).", events.CONTROLLER_UP)]:
     app.on_event(text, kind)
 assert app.icon.shown[-1][0] == ("C", tray.GREEN), app.icon.shown
 print("busy cleared after console task ok")
+
+# Button mapping also stops the loop (the Switch mustn't get the buttons pressed to remap
+# them), and a pause on before the task is put back when the loop restarts.
+stopped, restarted = threading.Event(), threading.Event()
+app.stop_worker, app.start_worker = stopped.set, restarted.set
+app.state.paused = True
+tray.subprocess.run = lambda cmd, creationflags=0: None
+app.run_console(["--remap"])
+assert stopped.is_set() and restarted.wait(2)
+assert app.commands.get_nowait() == "pause"
+print("mapping editor stops the loop ok")
 print("ALL OK")

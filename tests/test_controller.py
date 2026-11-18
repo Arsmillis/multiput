@@ -312,4 +312,84 @@ pinned = c.ControllerSlot(pads, fixed=3)
 pads.calls.clear()
 assert not pinned.read(state, 5.0) and pads.calls == [3] and pinned.current == 3   # never looks elsewhere
 print("controller auto-pick ok")
+
+# Press-to-map captures: anything held at the start must be released first; then the first
+# new press wins (ButtonCapture), or everything held together until released (ComboCapture).
+cap = c.ButtonCapture()
+assert cap.feed({"VIEW"}) is None and cap.feed({"VIEW"}) is None   # still holding what opened the menu
+assert cap.feed(set()) is None                                      # released: now listening
+assert cap.feed({"LB"}) == "LB"
+cap = c.ButtonCapture()
+cap.feed(set())
+assert cap.feed({"B", "A"}) == "A"                                   # two at once: the first in Xbox order
+combo = c.ComboCapture()
+assert combo.feed({"A"}) is None and combo.feed(set()) is None       # held at the start: ignored
+assert combo.feed({"LS"}) is None and combo.feed({"LS", "RS"}) is None and combo.feed({"RS"}) is None
+assert combo.feed(set()) == ("LS", "RS")                            # released: the combo is done
+print("press capture ok")
+
+# The editor's prompt listens to the keyboard and the controller at once (a scripted console):
+# steps are typed text (str), controller readings (set), or NO_PAD (no controller connected).
+NO_PAD = object()
+class Console:
+    def __init__(self, *steps):
+        self.steps = [*steps, "\r"]          # Enter at the end closes the editor
+    def kbhit(self):
+        return bool(self.steps) and isinstance(self.steps[0], str)
+    def getwch(self):
+        ch, rest = self.steps[0][0], self.steps[0][1:]
+        if rest:
+            self.steps[0] = rest
+        else:
+            self.steps.pop(0)
+        return ch
+    def read(self):
+        if self.steps and not isinstance(self.steps[0], str):
+            step = self.steps.pop(0)
+            return None if step is NO_PAD else step
+        return set()
+def run_editor(saved, console, *answers):
+    """answers: what's typed at the follow-up questions (input())."""
+    it = iter(answers)
+    multiput.input = lambda prompt: next(it)
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        multiput.edit_mapping(cfg, saved, console.read if console else None, console)
+    del multiput.input
+    return out.getvalue()
+multiput.CAPTURE_TIMEOUT_S = 0.3
+cfg = pathlib.Path(tempfile.mkdtemp())
+saved = {"link": "wifi"}
+# Press LB at the prompt, pick 7 (ZL); then press X and keep it (Enter).
+out = run_editor(saved, Console(set(), {"LB"}, set(), {"X"}, set()), "7", "")
+assert saved["buttons"] == {"LB": "ZL"} and "X sends X" in out, out
+assert json.loads((cfg / "settings.json").read_text())["buttons"] == {"LB": "ZL"}
+# A button already held when the editor opens is ignored until released.
+out = run_editor(saved, Console({"A"}, {"A"}, set(), {"Y"}, set()), "")
+assert "A sends" not in out and "Y sends Y" in out, out
+# Not a Switch button: explained, nothing changes.
+out = run_editor(saved, Console(set(), {"A"}), "JUMP")
+assert "unknown Switch button" in out and saved["buttons"] == {"LB": "ZL"}, out
+# Typing still works at the same prompt (backspace included), and a press mid-line doesn't interrupt it.
+run_editor(saved, Console("B=X\bA", {"RB"}, "\r"))
+assert saved["buttons"] == {"LB": "ZL", "B": "A"}, saved
+# P: record LS + RS and add it as another combo; then record XBOX and replace them all.
+run_editor(saved, Console("P\r", set(), {"LS"}, {"LS", "RS"}, set()), "")
+assert multiput.pause_combos(saved) == (("VIEW", "MENU"), ("LS", "RS")), saved
+run_editor(saved, Console("P\r", set(), {"XBOX"}, set()), "r")
+assert multiput.pause_combos(saved) == (("XBOX",),)
+# P with no controller connected: says so; Esc cancels; nothing changes.
+out = run_editor(saved, Console("P\r", NO_PAD, "\x1b"))
+assert "No controller connected" in out and multiput.pause_combos(saved) == (("XBOX",),), out
+# Nothing pressed: the recording times out.
+with contextlib.redirect_stdout(io.StringIO()) as out:
+    assert multiput.wait_for_buttons(c.ComboCapture(), lambda: set(), None) is None
+assert "Timed out" in out.getvalue()
+# Without a console keyboard (not Windows): typed changes through input(), as before.
+it = iter(["A=B", ""])
+multiput.input = lambda prompt: next(it)
+with contextlib.redirect_stdout(io.StringIO()):
+    multiput.edit_mapping(cfg, saved, keyboard=None)
+del multiput.input
+assert saved["buttons"]["A"] == "B"
+print("press-to-map editor ok")
 print("ALL OK")
