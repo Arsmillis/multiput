@@ -4,6 +4,7 @@
 ```
 multiput/
 ├── README.md               user guide: install, use, security, building
+├── CLAUDE.md               working rules for Claude Code and contributors (workflow, commands, gotchas)
 ├── LICENSE, NOTICE         Apache 2.0 license and the attribution that redistributors must carry
 ├── THIRD_PARTY_NOTICES.md  licenses of components inside the firmware and installer
 ├── VERSION                 the version number (single source; see Versioning and releases)
@@ -67,6 +68,7 @@ Things that must stay in sync across the two halves:
 1. Work on a branch, e.g. `git switch -c fix/bt-reconnect`.
 2. Run `tools/run_tests.sh` (WSL). If you changed the firmware or the installer, run the full build with `tools\build.bat`.
 3. Decide the version your change ships as, following the bump rules in [Versioning and releases](#versioning-and-releases). Set `VERSION` to it, and add your change to `CHANGELOG.md` under `## [X.Y.Z] - YYYY-MM-DD`. If that section doesn't exist yet, create it above the previous release; if another PR already bumped the version for the same release, add to its section. "Unreleased" is only for changes that won't trigger a release on their own.
+   **Documentation-only changes** (the README, `docs/`, `CLAUDE.md`, `TODO`, comments) don't trigger a release: leave `VERSION` and `CHANGELOG.md` as they are.
 4. Push the branch and open a pull request into `main`. Merge it once it's reviewed and the tests pass.
 
 Releases are made from `main` after merging (see [Versioning and releases](#versioning-and-releases)).
