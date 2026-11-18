@@ -381,7 +381,9 @@ class TrayApp:
                 subprocess.run(console_command(*args), creationflags=subprocess.CREATE_NEW_CONSOLE)
             finally:
                 self.busy = None
-                if needs_pico:
+                if needs_pico:  # the Pico is back: a fresh state (not busy), shown until the loop reports in
+                    self.state = TrayState(self.state.link_name)
+                    self.icon.refresh(self.state.badge(), self.state.tooltip())
                     self.start_worker()
                 if then:
                     then()

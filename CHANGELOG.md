@@ -4,6 +4,10 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-18
+### Fixed
+- The tray icon stayed on "W" (busy) after Update the Pico, Performance test or Pico status finished, even once input was reaching the console again.
+
 ## [0.5.0] - 2026-11-17
 ### Added
 - multiput runs in the system tray (`multiputw.exe`, opened by the desktop and Start menu shortcuts):

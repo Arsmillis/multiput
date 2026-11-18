@@ -74,4 +74,25 @@ assert busy.badge() == ("W", tray.AMBER) and busy.tooltip() == "multiput: busy i
 assert tray.rounded_square(8, 8, 16) == 1.0 and tray.rounded_square(0, 0, 16) < 0.3
 assert any(0 < tray.rounded_square(x, y, 16) < 1 for y in range(16) for x in range(16))  # soft edge pixels
 print("badges ok")
+
+# After a console task that had the Pico (update, performance test, status), the icon must
+# leave "busy" and follow the restarted loop again. 0.5.0 never cleared busy, so it stayed on W.
+import threading
+app = object.__new__(tray.TrayApp)
+app.state, app.icon, app.busy = tray.TrayState("Wi-Fi"), FakeIcon(), None
+app.stop_worker = lambda: None
+restarted = threading.Event()
+app.start_worker = restarted.set
+console_done = threading.Event()
+def fake_console(cmd, creationflags=0):
+    assert app.state.badge() == ("W", tray.AMBER) and app.state.busy  # busy while the task runs
+    console_done.set()
+tray.subprocess.run, tray.subprocess.CREATE_NEW_CONSOLE = fake_console, 0
+app.run_console(["--update"], needs_pico=True)
+assert restarted.wait(2) and console_done.is_set()
+assert not app.state.busy and app.busy is None
+for text, kind in [("Pico session started.", events.PICO_UP), ("Controller connected (slot 0).", events.CONTROLLER_UP)]:
+    app.on_event(text, kind)
+assert app.icon.shown[-1][0] == ("C", tray.GREEN), app.icon.shown
+print("busy cleared after console task ok")
 print("ALL OK")
