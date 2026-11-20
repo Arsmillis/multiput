@@ -67,9 +67,9 @@ If you try multiput on another console, open an issue with what worked and what 
 | Controller | Read through | Status |
 |---|---|---|
 | **Xbox** (One, Series X\|S, 360, Elite) and other XInput pads | XInput (built into Windows) | **Works**, tested |
-| PlayStation (DualShock 4, DualSense) | SDL | Not tested yet |
-| Nintendo Switch Pro Controller | SDL | Not tested yet |
-| 8BitDo and other generic pads | SDL, if its controller database knows the pad | Not tested yet |
+| PlayStation (DualShock 4, DualSense) | SDL | **Works**, tested (DualShock 4) |
+| Nintendo Switch Pro Controller | SDL | **Works**, tested |
+| 8BitDo and other generic pads | SDL, if its controller database knows the pad | **Works**, tested with an 8BitDo |
 
 multiput uses the first controller that connects, checking Xbox controllers first, and keeps it until it disconnects. `--controller N` pins one Xbox controller and ignores the others. A controller whose button layout SDL doesn't know is reported once in the status messages and left out.
 
