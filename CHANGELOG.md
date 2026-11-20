@@ -4,6 +4,10 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-19
+### Changed
+- The author is now credited by the pseudonym **Arsmillis**: in the copyright notices, `NOTICE` (Apache-2.0 attribution), the startup banner and the installer's publisher details.
+
 ## [0.7.0] - 2026-11-19
 ### Added
 - PlayStation (DualShock 4, DualSense), Switch Pro and generic controllers, read through SDL 2 (bundled). Xbox controllers stay on XInput.
