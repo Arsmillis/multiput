@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2026 Arsmillis (https://github.com/Arsmillis/multiput)
-"""Reading the Xbox controller (XInput) and turning its state into a Switch report.
+"""Reading the controller and turning its state into a Switch report. Xbox controllers are
+read through XInput; others through SDL (sdl_input.py), into the same XINPUT_GAMEPAD.
 
 The report is the 8-byte HID input report of a HORIPAD S, which the Pico passes
 to the Switch unchanged.
@@ -251,6 +252,45 @@ class ControllerSlot:
         return False
 
 
+class Controllers:
+    """The controller multiput reads: Xbox controllers through XInput (`xinput`, a
+    ControllerSlot), others through SDL (`sdl`, an SdlPads, or None). The one in use is kept
+    until it disconnects, then the first connected is picked again, Xbox controllers first.
+    (Not rechecking XInput while an SDL pad is in use: scanning empty slots is slow.)"""
+
+    def __init__(self, xinput, sdl=None):
+        self.xinput, self.sdl, self.active = xinput, sdl, None
+
+    def read(self, state, now):
+        """Fill `state` from the controller; returns False if none is connected."""
+        if self.active is self.sdl and self.active is not None:
+            if self.sdl.read(state, now):
+                return True
+            self.active = None
+        if self.xinput.read(state, now):
+            self.active = self.xinput
+            return True
+        if self.sdl is not None and self.sdl.read(state, now):
+            self.active = self.sdl
+            return True
+        self.active = None
+        return False
+
+    def describe(self):
+        """The controller in use, for messages: SDL's name for it, or (XInput reports no
+        name, and third-party pads use it too) "Xbox-compatible controller (slot 0)"."""
+        if self.active is self.sdl and self.sdl:
+            return self.sdl.name
+        return f"Xbox-compatible controller (slot {self.xinput.current})"
+
+
+def open_controllers(get_state=None, fixed=None):
+    """Controllers for this machine. A fixed XInput slot (--controller N) leaves SDL out."""
+    import sdl_input  # imports this module
+    return Controllers(ControllerSlot(get_state or load_xinput(), fixed),
+                       None if fixed is not None else sdl_input.open_pads())
+
+
 class ButtonCapture:
     """Press-to-map: waits for one Xbox button press. Buttons already held when it starts
     must be released first, so what you were holding (e.g. to open the menu) doesn't count."""
@@ -286,13 +326,12 @@ class ComboCapture:
         return tuple(name for name in XBOX_BUTTONS if name in self.combo) or None
 
 
-def held_buttons_reader(get_state=None):
-    """read() -> the Xbox buttons held on the first connected controller, or None if none is."""
-    get_state = get_state or load_xinput()
-    slot, state = ControllerSlot(get_state), XINPUT_STATE()
+def held_buttons_reader(controllers=None):
+    """read() -> the buttons (Xbox names) held on the first connected controller, or None if none is."""
+    controllers, state = controllers or open_controllers(), XINPUT_STATE()
 
     def read():
-        return pressed(state.Gamepad) if slot.read(state, time.monotonic()) else None
+        return pressed(state.Gamepad) if controllers.read(state, time.monotonic()) else None
 
     return read
 

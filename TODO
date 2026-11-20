@@ -1,8 +1,8 @@
 * Better UI
 * Running on MacOS & Linux
   - Only XInput, the Windows Bluetooth COM-port detection and the installer are Windows-specific; protocol and links are portable
-* Support more controllers -- currently assumes XBox controller inputs (XInput)
-  - Read controllers through SDL (PlayStation, Switch Pro, generic); pairs with the MacOS & Linux item
+* More controllers (SDL since 0.7.0)
+  - Share/Capture button: Series X|S Share, PlayStation mic/touchpad, Switch Pro Capture -> Switch CAPTURE (SDL's MISC1)
   - Confirm and document the Xbox Adaptive Controller (XInput, so it most likely already works)
 * Support for other consoles
   - Switch 1: should already work (same HORIPAD), untested

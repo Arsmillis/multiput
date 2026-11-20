@@ -5,8 +5,10 @@ The Win32 icon itself needs Windows; this part runs anywhere.
 
 Run: python3 tests/test_tray.py
 """
+import itertools
 import pathlib
 import sys
+import types
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pc"))
@@ -14,22 +16,31 @@ import events  # noqa: E402
 import tray  # noqa: E402
 
 s = tray.TrayState("Wi-Fi")
-assert s.badge() == ("W", tray.AMBER) and "looking for the Pico over Wi-Fi" in s.tooltip()
+assert s.badge() == ("W", tray.AMBER) and "Looking for the Pico over Wi-Fi" in s.tooltip()
 # Routine start-up: no notifications.
 assert s.on_event("Waiting for the Pico...", events.INFO) is None
 assert s.on_event("Pico session started.", events.PICO_UP) is None
 assert s.on_event("Pico firmware 0.5.0 (up to date).", events.FIRMWARE_OK) is None
-assert s.badge() == ("W", tray.AMBER) and "waiting for a controller" in s.tooltip()
-assert s.on_event("Controller connected (slot 0).", events.CONTROLLER_UP) is None
-assert s.badge() == ("C", tray.GREEN) and s.tooltip() == "multiput: sending to the console over Wi-Fi"
+assert s.badge() == ("W", tray.AMBER) and "Waiting for a controller" in s.tooltip()
+assert s.on_event("Controller connected: DualSense Wireless Controller.", events.CONTROLLER_UP,
+                  "DualSense Wireless Controller") is None
+# The tooltip: multiput, the status, and the controller in use, on separate lines.
+assert s.badge() == ("C", tray.GREEN)
+assert s.tooltip() == "multiput\nSending to the console over Wi-Fi\nDualSense Wireless Controller", s.tooltip()
+# The menu shows the same status, one item per line (menu items can't break lines), without "multiput".
+app = object.__new__(tray.TrayApp)
+app.state, app.busy = s, None
+app.store, app.cfg = types.SimpleNamespace(load_settings=lambda cfg: {"link": "wifi"}), None
+header = list(itertools.takewhile(lambda item: item is not None, app.menu()))
+assert header == [(0, "Sending to the console over Wi-Fi", tray.MF_GRAYED), (0, "DualSense Wireless Controller", tray.MF_GRAYED)], header
 print("start-up ok")
 
 # Things worth a notification.
 title, text, warning = s.on_event("Paused: ...", events.PAUSED)
-assert title == "Paused" and not warning and s.badge() == ("P", tray.GREY) and "paused" in s.tooltip()
+assert title == "Paused" and not warning and s.badge() == ("P", tray.GREY) and s.tooltip().split("\n")[1:] == ["Paused: the console gets no input", "DualSense Wireless Controller"]
 assert s.on_event("Resumed: ...", events.RESUMED)[0] == "Resumed" and s.badge() == ("C", tray.GREEN)
 title, _, warning = s.on_event("Lost contact with the Pico; ...", events.PICO_LOST)
-assert title == "Lost contact with the Pico" and warning and s.badge() == ("W", tray.AMBER) and "reconnecting" in s.tooltip()
+assert title == "Lost contact with the Pico" and warning and s.badge() == ("W", tray.AMBER) and "Reconnecting" in s.tooltip()
 assert s.on_event("Reconnected to the Pico.", events.PICO_UP)[0] == "Reconnected" and s.badge() == ("C", tray.GREEN)
 assert s.on_event("Controller not connected; waiting...", events.CONTROLLER_LOST)[0] == "Controller disconnected"
 assert s.on_event("Controller not connected; waiting...", events.CONTROLLER_LOST) is None  # only once
@@ -38,7 +49,7 @@ assert s.on_event("Keyboard shortcut not available: ...", events.WARNING)[2] is 
 print("notifications ok")
 
 s.fail("Couldn't find the Pico's Bluetooth COM port.")
-assert s.badge() == ("F", tray.RED) and s.tooltip().startswith("multiput: Couldn't find")   # failed: red F
+assert s.badge() == ("F", tray.RED) and s.tooltip().startswith("multiput\nStopped: Couldn't find")   # failed: red F
 assert len(tray.TrayState("x" * 200).tooltip()) <= 127                       # Windows' tooltip limit
 print("errors and tooltip limit ok")
 
@@ -60,7 +71,7 @@ class FakeIcon:
         self.shown.append(args)
 app = object.__new__(tray.TrayApp)
 app.state, app.icon = tray.TrayState("Wi-Fi"), FakeIcon()
-for text, kind in [("Pico session started.", events.PICO_UP), ("Controller connected (slot 0).", events.CONTROLLER_UP),
+for text, kind in [("Pico session started.", events.PICO_UP), ("Controller connected: Xbox-compatible controller (slot 0).", events.CONTROLLER_UP),
                    ("Paused: ...", events.PAUSED), ("Resumed: ...", events.RESUMED)]:
     app.on_event(text, kind)
 shown = [args[0] for args in app.icon.shown]
@@ -69,7 +80,7 @@ print("icon follows events ok")
 
 busy = tray.TrayState("Wi-Fi")
 busy.busy = True                                  # a console task has the Pico
-assert busy.badge() == ("W", tray.AMBER) and busy.tooltip() == "multiput: busy in another window"
+assert busy.badge() == ("W", tray.AMBER) and busy.tooltip() == "multiput\nBusy in another window"
 # The icon's rounded square: solid inside, clear in the corners, smoothed at the edge.
 assert tray.rounded_square(8, 8, 16) == 1.0 and tray.rounded_square(0, 0, 16) < 0.3
 assert any(0 < tray.rounded_square(x, y, 16) < 1 for y in range(16) for x in range(16))  # soft edge pixels
@@ -92,7 +103,7 @@ tray.subprocess.run, tray.subprocess.CREATE_NEW_CONSOLE = fake_console, 0
 app.run_console(["--update"])
 assert restarted.wait(2) and console_done.is_set()
 assert not app.state.busy and app.busy is None
-for text, kind in [("Pico session started.", events.PICO_UP), ("Controller connected (slot 0).", events.CONTROLLER_UP)]:
+for text, kind in [("Pico session started.", events.PICO_UP), ("Controller connected: Xbox-compatible controller (slot 0).", events.CONTROLLER_UP)]:
     app.on_event(text, kind)
 assert app.icon.shown[-1][0] == ("C", tray.GREEN), app.icon.shown
 print("busy cleared after console task ok")

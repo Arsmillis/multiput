@@ -313,6 +313,85 @@ pads.calls.clear()
 assert not pinned.read(state, 5.0) and pads.calls == [3] and pinned.current == 3   # never looks elsewhere
 print("controller auto-pick ok")
 
+# Other controllers through SDL (sdl_input.py), against a fake of the SDL functions it uses.
+import events
+import sdl_input
+class FakeSDL:
+    """Joysticks: dicts with name, mapped (has a known layout), type, attached, buttons, axes."""
+    SDL_CONTROLLER_TYPE_XBOX360, SDL_CONTROLLER_TYPE_XBOXONE, SDL_CONTROLLER_TYPE_PS5 = 1, 2, 7
+    (SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B, SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y,
+     SDL_CONTROLLER_BUTTON_BACK, SDL_CONTROLLER_BUTTON_GUIDE, SDL_CONTROLLER_BUTTON_START,
+     SDL_CONTROLLER_BUTTON_LEFTSTICK, SDL_CONTROLLER_BUTTON_RIGHTSTICK, SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+     SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_DOWN,
+     SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) = range(15)
+    (SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY,
+     SDL_CONTROLLER_AXIS_TRIGGERLEFT, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) = range(6)
+    def __init__(self, *joysticks):
+        self.joysticks, self.opened, self.updates = list(joysticks), [], 0
+    def SDL_GameControllerUpdate(self): self.updates += 1
+    def SDL_NumJoysticks(self): return len(self.joysticks)
+    def SDL_IsGameController(self, i): return self.joysticks[i]["mapped"]
+    def SDL_JoystickNameForIndex(self, i): return self.joysticks[i]["name"].encode()
+    def SDL_GameControllerTypeForIndex(self, i): return self.joysticks[i]["type"]
+    def SDL_GameControllerOpen(self, i):
+        self.opened.append(self.joysticks[i]["name"])
+        return self.joysticks[i]
+    def SDL_GameControllerName(self, pad): return pad["name"].encode()
+    def SDL_GameControllerGetAttached(self, pad): return pad["attached"]
+    def SDL_GameControllerClose(self, pad): pass
+    def SDL_GameControllerGetButton(self, pad, b): return int(b in pad["buttons"])
+    def SDL_GameControllerGetAxis(self, pad, a): return pad["axes"].get(a, 0)
+def joystick(name, type_=7, mapped=True):
+    return {"name": name, "type": type_, "mapped": mapped, "attached": True, "buttons": set(), "axes": {}}
+said = []
+events.set_handler(lambda text, kind, subject: said.append((text, kind)))
+xbox, unknown, dualsense = joystick("Xbox 360 Controller", 1), joystick("Odd Stick", mapped=False), joystick("DualSense")
+sdl = FakeSDL(xbox, unknown, dualsense)
+pads = sdl_input.SdlPads(sdl)
+st = c.XINPUT_STATE()
+assert pads.read(st, 0.0) and pads.name == "DualSense" and sdl.opened == ["DualSense"]   # Xbox skipped: XInput's
+assert [k for _, k in said] == [events.WARNING] and "Odd Stick" in said[0][0]             # unknown layout: said once
+pads.pad = None
+pads.read(st, 5.0)
+assert len(said) == 1                                                                      # ...not on every scan
+F = FakeSDL
+dualsense["buttons"] = {F.SDL_CONTROLLER_BUTTON_A, F.SDL_CONTROLLER_BUTTON_GUIDE, F.SDL_CONTROLLER_BUTTON_DPAD_LEFT}
+dualsense["axes"] = {F.SDL_CONTROLLER_AXIS_LEFTY: -32768, F.SDL_CONTROLLER_AXIS_RIGHTY: 32767,  # left up, right down
+                     F.SDL_CONTROLLER_AXIS_LEFTX: -32768, F.SDL_CONTROLLER_AXIS_TRIGGERLEFT: 32767,
+                     F.SDL_CONTROLLER_AXIS_TRIGGERRIGHT: 3000}
+assert pads.read(st, 5.1)
+g = st.Gamepad
+assert c.pressed(g) == {"A", "XBOX", "LT"} and g.wButtons & c.X_LEFT                # RT 3000 -> 23: under the threshold
+assert (g.sThumbLY, g.sThumbRY, g.sThumbLX, g.bLeftTrigger, g.bRightTrigger) == (32767, -32767, -32768, 255, 23)
+report = c.build_report(g, c.button_map({}))
+assert struct.unpack_from("<H", report)[0] == c.S_A | c.S_HOME | c.S_ZL and report[3] == 0   # left stick fully up
+dualsense["attached"] = False                                                      # unplugged: closed, rescanned
+assert not pads.read(st, 5.2) and pads.pad is None
+dualsense["attached"] = True
+assert not pads.read(st, 5.3) and pads.read(st, 6.3)                               # back after the next scan
+print("sdl controllers ok")
+
+# XInput and SDL together: Xbox first when picking, but the controller in use is kept (no XInput
+# rescans while an SDL pad is in use), and picked again when it disconnects.
+class Reader:
+    def __init__(self, name): self.on, self.reads, self.name, self.current = False, 0, name, 0
+    def read(self, state, now):
+        self.reads += 1
+        return self.on
+x, s_ = Reader("xinput"), Reader("DualSense")
+both = c.Controllers(x, s_)
+assert not both.read(st, 0) and x.reads == 1 and s_.reads == 1
+s_.on = True
+assert both.read(st, 0) and both.describe() == "DualSense"
+x.on, x.reads = True, 0
+assert both.read(st, 0) and both.describe() == "DualSense" and x.reads == 0          # kept while connected
+s_.on = False
+assert both.read(st, 0) and both.describe() == "Xbox-compatible controller (slot 0)"                              # gone: the Xbox pad
+s_.on = True
+assert both.read(st, 0) and both.describe() == "Xbox-compatible controller (slot 0)"                              # and it's kept in turn
+assert c.Controllers(x).read(st, 0) and c.Controllers(x).describe() == "Xbox-compatible controller (slot 0)"      # no SDL: XInput only
+print("controller choice ok")
+
 # Press-to-map captures: anything held at the start must be released first; then the first
 # new press wins (ButtonCapture), or everything held together until released (ComboCapture).
 cap = c.ButtonCapture()

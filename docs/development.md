@@ -19,7 +19,8 @@ multiput/
 │   ├── multiput.py         entry point: command line, main loop (run_loop)
 │   ├── tray.py             the system tray app (multiputw.exe / --tray): icon, menu, notifications
 │   ├── events.py           status messages: printed in the console, shown by the tray
-│   ├── controller.py       reads the Xbox controller (XInput), builds the Switch report, mapping, pause, sticky/turbo
+│   ├── controller.py       picks and reads the controller (Xbox via XInput), builds the Switch report, mapping, pause, sticky/turbo
+│   ├── sdl_input.py        other controllers (PlayStation, Switch Pro, generic) through SDL, in the Xbox layout
 │   ├── hotkey.py           the system-wide keyboard shortcut for pausing (Windows RegisterHotKey)
 │   ├── protocol.py         signing and the session with the Pico (PC half of protocol.h)
 │   ├── links.py            Wi-Fi (UDP) and Bluetooth (COM port) connections, with reconnecting; finds the Pico's COM port
@@ -100,13 +101,13 @@ Example: `multiput --setup --link wifi --ssid HomeNet --drive E:\`
 - `multiput --perf-test`: measure the round trip over each link (see [Performance](performance.md)). It refuses to run alongside multiput; a named mutex (`Local\multiput`) stops two copies running at once.
 - `multiput --link wifi` / `--link bt`: switch link; remembered as the default. The Pico listens on both (see the README).
 - `multiput --bt COM5`: use Bluetooth on this port, skipping auto-detection. Without it, multiput finds the port of the paired device named `multiput`: Windows stores the device's Bluetooth address under `HKLM\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices`, and the outgoing COM port's hardware ID contains that address. It falls back to the saved port if that fails.
-- `multiput --controller 1`: use this XInput slot (0–3). Without it, multiput uses the first connected controller and picks again if that one disconnects.
+- `multiput --controller 1`: use only this Xbox controller (XInput slot 0–3). Without it, multiput uses the first connected controller of any kind (Xbox first, then SDL) and picks again when that one disconnects.
 - `multiput --remap XBOX=SWITCH ... PAUSE=A+B,C PAUSE_HOLD=0.5 PAUSE_KEY=CTRL+ALT+P BEEP=OFF STICKY=A TURBO=B`: change the button mapping and pause combos (saved as `"buttons"`, `"pause"`, `"pause_hold"`, `"pause_key"`, `"beep"`, `"sticky"` and `"turbo"` in `settings.json`, only where they differ from the default; `"pause"` is a list of combos, and the older single-combo form `["XBOX"]` is still read). `--remap` alone opens the interactive editor, or just prints the mapping when there's no console. Pressing M in the running multiput window opens the same editor, and changes there apply immediately. `reset` clears everything. See the README's Mapping section for names.
 - `multiput --insecure`: send unsigned packets. The Pico must have been set up with `--allow-unsigned`.
 - `multiput --config-dir DIR`: keep the key and settings somewhere other than `%APPDATA%\multiput`, for example to run two separate setups.
 
 ## Running from source
-Python 3.11+ on Windows (older versions poll the controller too slowly); Bluetooth also needs `pip install pyserial`. Build the firmware first (below), then:
+Python 3.11+ on Windows (older versions poll the controller too slowly); Bluetooth also needs `pip install pyserial`; controllers other than Xbox need `pip install pysdl2 pysdl2-dll` (without them, multiput says so and reads Xbox controllers only). Build the firmware first (below), then:
 ```
 python pc\multiput.py --setup
 python pc\multiput.py
@@ -158,6 +159,6 @@ multiput uses [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, s
 `tools/run_tests.sh` runs them all:
 - `python3 tests/test_protocol.py`: the PC's real signing code against the Pico's `protocol.h`, compiled on the desktop with the core's own BearSSL.
 - `python3 tests/test_setup.py`: settings patching (including the built `.uf2` files) and the `--setup` flow.
-- `python3 tests/test_controller.py`: button mapping, `--remap`, pause combos, and M-key editing.
+- `python3 tests/test_controller.py`: button mapping, `--remap`, pause combos, M-key editing, and reading controllers (XInput slots, SDL against a fake SDL, and choosing between them).
 - `python3 tests/test_perf.py`: the performance test's measuring logic, against a fake Pico.
 - `python3 tests/test_release.py`: release notes generation.

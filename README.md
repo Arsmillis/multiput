@@ -3,11 +3,11 @@
 **Send one controller's input to your PC and a console at once.**
 
 ```
-Xbox controller ──(USB/Bluetooth)──► Windows PC ── PC games read it normally
-                                        │
-                                   multiput.exe (XInput → signed packets over Wi-Fi)
-                                        ▼
-                         Pico W ──(USB)──► console, e.g. Switch 2 dock (seen as a wired controller)
+Controller ──(USB/Bluetooth)──► Windows PC ── PC games read it normally
+                                   │
+                              multiput.exe (XInput/SDL → signed packets over Wi-Fi)
+                                   ▼
+                    Pico W ──(USB)──► console, e.g. Switch 2 dock (seen as a wired controller)
 ```
 
 Each press goes to both devices once: the PC gets it directly from the controller, and the console gets it from the Pico. See [Tested consoles](#tested-consoles) for which consoles work; the rest of this guide uses the Switch 2.
@@ -18,6 +18,7 @@ For why the Pico W, its hardware requirements, and the end-to-end flow, see [doc
   - [Contents](#contents)
   - [Personal Intro \& AI Use](#personal-intro--ai-use)
   - [Tested consoles](#tested-consoles)
+  - [Controllers](#controllers)
   - [Install](#install)
     - [What you need](#what-you-need)
     - [Steps](#steps)
@@ -62,12 +63,34 @@ to AI usage. I understand not liking AI -- I have my own reservations -- but it 
 
 If you try multiput on another console, open an issue with what worked and what didn't.
 
+## Controllers
+| Controller | Read through | Status |
+|---|---|---|
+| **Xbox** (One, Series X\|S, 360, Elite) and other XInput pads | XInput (built into Windows) | **Works**, tested |
+| PlayStation (DualShock 4, DualSense) | SDL | Not tested yet |
+| Nintendo Switch Pro Controller | SDL | Not tested yet |
+| 8BitDo and other generic pads | SDL, if its controller database knows the pad | Not tested yet |
+
+multiput uses the first controller that connects, checking Xbox controllers first, and keeps it until it disconnects. `--controller N` pins one Xbox controller and ignores the others. A controller whose button layout SDL doesn't know is reported once in the status messages and left out.
+
+Every controller uses the Xbox button names in the [mapping](#mapping), by position:
+
+| Xbox name | PlayStation | Switch Pro |
+|---|---|---|
+| `A` `B` `X` `Y` | Cross, Circle, Square, Triangle | A, B, X, Y (by label, so each presses the same button on the Switch) |
+| `LB` `RB` / `LT` `RT` | L1 R1 / L2 R2 | L R / ZL ZR |
+| `VIEW` `MENU` | Share (Create), Options | −, + |
+| `LS` `RS` | L3, R3 | stick clicks |
+| `XBOX` | PS | Home |
+
+With Steam running, Steam Input may present a PlayStation or Switch Pro controller as an Xbox controller. multiput then reads it through XInput, which works the same.
+
 ## Install
 
 ### What you need
 - A **Raspberry Pi Pico W**: the original, not the Pico 2 W or a Pico without the "W". No soldering needed.
 - A **micro‑USB to USB‑A data cable**. Charge-only cables won't work.
-- A **Windows 10 or 11 PC** and an **Xbox controller** connected to it.
+- A **Windows 10 or 11 PC** and a **controller** connected to it: Xbox, PlayStation, Switch Pro or a generic pad (see [Controllers](#controllers)).
 - A **2.4 GHz Wi‑Fi network** that the PC is also on (the PC itself can use 5 GHz or Ethernet).
 
 ### Steps
@@ -92,7 +115,7 @@ If you try multiput on another console, open an issue with what worked and what 
 ## Use
 Double-click the **multiput** desktop shortcut. multiput starts in the **system tray**, next to the clock; you may need to click ^ to see its icon. The icon is a letter on a coloured square:
 - **C** (green): connected, and sending your controller to the console.
-- **W** (orange): waiting: looking for the Pico, reconnecting, no controller connected, or busy in another window. Hover over the icon to see which.
+- **W** (orange): waiting: looking for the Pico, reconnecting, no controller connected, or busy in another window. Hover over the icon to see which, and which controller is in use (e.g. *DualSense Wireless Controller*, or *Xbox-compatible controller (slot 0)*).
 - **P** (grey): paused.
 - **F** (red): failed: multiput stopped with an error. Hover to read it, then use the menu, for example to switch link.
 
@@ -114,7 +137,7 @@ Tasks that need the Pico to themselves (update, performance test, status) open i
 ```
 Sending the first connected controller to multiput.local (192.168.1.50:41234). Ctrl+C or close this window to stop.
 Pico session started.
-Controller connected (slot 0).
+Controller connected: Xbox-compatible controller (slot 0).
 ```
 **Pause the Switch side:** hold **View + Menu** for 1 second, or press **Ctrl+Alt+P** on the keyboard, which works even while a game has focus. You can change the combo, the hold time (down to a single tap) and the shortcut; see [Mapping](#mapping). multiput beeps (low tone), and the Switch sees no buttons pressed until you pause again to resume (high tone). Turn the beep off with `BEEP=OFF`. Your PC game keeps working the whole time, because it reads the controller directly. While a combo is held, its buttons aren't sent to the Switch, so View + Menu doesn't press − and + there.
 
@@ -172,7 +195,7 @@ You can also pass them straight on the command line, e.g. `multiput --remap A=B 
 
 **Sticky and turbo** help when holding or repeatedly pressing a button is hard. A sticky button stays held on the Switch until you tap it again. It's released if the controller disconnects, and stays held while paused. A turbo button repeats while you hold it. A button can't be both. Keyboard shortcuts need Ctrl, Alt or Win with a letter or digit, so they don't interfere with typing. F1–F24, Pause, Scroll Lock, Insert, Home, End, Page Up and Page Down also work, with or without modifiers.
 
-The d-pad and sticks always map straight across. Pause combos, sticky and turbo use Xbox (physical) button names, whatever those buttons are remapped to, and a combo's buttons aren't sent to the Switch while it's held. Remapping only affects the Switch; PC games still see the Xbox controller as it is.
+The d-pad and sticks always map straight across. Pause combos, sticky and turbo use Xbox (physical) button names, whatever those buttons are remapped to, and a combo's buttons aren't sent to the Switch while it's held. Remapping only affects the Switch; PC games still see the controller as it is.
 
 ## Notes
 - If no valid input arrives for 250 ms (Wi‑Fi hiccup, multiput closed, controller off), the Pico releases every input, so buttons never get stuck. If the Pico loses Wi‑Fi, it keeps retrying in the background (every 10 s) without disturbing Bluetooth. multiput notices within about 4 s when the Pico stops answering, and reconnects on its own, even if the Pico came back with a new IP address or the Bluetooth link dropped.
@@ -211,7 +234,7 @@ Everything the build prints is also saved to `build\logs\build.log`, which is re
 | Firmware only (WSL) | `tools/build_firmware.sh` |
 | Tests only (WSL) | `tools/run_tests.sh` |
 | Installer only (Windows; needs the firmware) | `tools\build_installer.bat` |
-| Run from source without installing (Windows) | `py pc\multiput.py --setup`, then `py pc\multiput.py`, or double-click `multiput.bat`. Bluetooth also needs `py -m pip install pyserial`. |
+| Run from source without installing (Windows) | `py pc\multiput.py --setup`, then `py pc\multiput.py`, or double-click `multiput.bat`. Bluetooth also needs `py -m pip install pyserial`, and controllers other than Xbox need `py -m pip install pysdl2 pysdl2-dll`. |
 
 **After building:** run `build\installer\multiput-setup-<version>.exe` and follow the [Install steps](#steps), the same as a downloaded install.
 - **Changed only PC code?** Reinstall, or close multiput and run it from source (`multiput.bat`).

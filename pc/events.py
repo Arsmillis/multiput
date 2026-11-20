@@ -18,13 +18,14 @@ _handler = None
 
 
 def set_handler(handler):
-    """handler(text, kind); None restores plain printing."""
+    """handler(text, kind, subject); None restores plain printing."""
     global _handler
     _handler = handler
 
 
-def say(text, kind=INFO):
+def say(text, kind=INFO, subject=None):
+    """subject: what the event is about, for handlers (CONTROLLER_UP: the controller's name)."""
     if _handler:
-        _handler(text, kind)
+        _handler(text, kind, subject)
     else:
-        print(text)
+        print(text, flush=True)  # also when redirected to a file or pipe, where output is buffered

@@ -21,16 +21,19 @@ rem Build tools go in a private venv, not your global Python.
 if not exist build\venv\Scripts\python.exe (
   py -3 -m venv build\venv || exit /b 1
 )
-build\venv\Scripts\python -m pip install --quiet --disable-pip-version-check --upgrade pyinstaller pyserial || exit /b 1
+build\venv\Scripts\python -m pip install --quiet --disable-pip-version-check --upgrade pyinstaller pyserial pysdl2==0.9.17 pysdl2-dll==2.32.10 || exit /b 1
 
 set /p VERSION=<VERSION
+rem Other controllers: just SDL2.dll from pysdl2-dll (it also ships SDL_image, _mixer, _ttf... which multiput doesn't use).
+rem Its import check also imports pip (optional), which would drag pip and setuptools in.
+set SDL=--hidden-import sdl2dll --add-binary "%CD%\build\venv\Lib\site-packages\sdl2dll\dll\SDL2.dll;sdl2dll\dll" --exclude-module pip --exclude-module setuptools
 echo Building multiput %VERSION%
 build\venv\Scripts\python -m PyInstaller --noconfirm --log-level WARN --onefile --console --name multiput ^
-  --add-data "%CD%\VERSION;." ^
+  --add-data "%CD%\VERSION;." %SDL% ^
   --paths pc --distpath build\dist --workpath build\work --specpath build pc\multiput.py || exit /b 1
 rem The same program without a console window: runs in the system tray.
 build\venv\Scripts\python -m PyInstaller --noconfirm --log-level WARN --onefile --windowed --name multiputw ^
-  --add-data "%CD%\VERSION;." ^
+  --add-data "%CD%\VERSION;." %SDL% ^
   --paths pc --distpath build\dist --workpath build\work --specpath build pc\multiput.py || exit /b 1
 
 call :findiscc

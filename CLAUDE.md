@@ -4,7 +4,7 @@ Guidance for Claude Code and other contributors working in this repo. The [READM
 
 ## What this is
 multiput sends one controller's input to the PC and a console at once:
-- **The Windows program** (`pc/`, Python) reads the controller through XInput and sends signed input to a Pico W.
+- **The Windows program** (`pc/`, Python) reads the controller (Xbox through XInput, others through SDL) and sends signed input to a Pico W.
 - **The Pico W** (`pico/multiput_pico/`, Arduino with the arduino-pico core) shows up on the console as a wired HORIPAD S controller.
 - **Links:** Wi‑Fi (UDP, `multiput.local`) or Bluetooth (an SPP COM port).
 - **Tested console:** Nintendo Switch 2.
@@ -23,7 +23,7 @@ The repo is on a Windows drive (`S:\Projects\multiput`, which WSL sees as `/mnt/
 - **Tests (WSL):** `tools/run_tests.sh` runs all the suites. They need gcc/g++ and the arduino-pico core in `~/.arduino15`.
 - **Full build (from WSL):** `cmd.exe /c "tools\build.bat"`. It builds the firmware, runs the tests, then builds `multiput.exe`, `multiputw.exe` and the installer. Output goes to `build/` (git-ignored), with logs in `build/logs/`.
 - **Firmware only:** `tools/build_firmware.sh`.
-- **From source on Windows:** `py pc\multiput.py` (console), or `pythonw pc\multiput.py --tray`. Bluetooth needs pyserial; `build\venv\Scripts\python.exe` has it.
+- **From source on Windows:** `py pc\multiput.py` (console), or `pythonw pc\multiput.py --tray`. Bluetooth needs pyserial and non-Xbox controllers need pysdl2 + pysdl2-dll; `build\venv\Scripts\python.exe` has them.
 
 ## The maintainer's hardware
 Their Pico W is in a Switch 2 dock, reachable as `multiput.local` over Wi‑Fi and on COM5 over Bluetooth. Their key and settings are in `%APPDATA%\multiput`.
@@ -37,7 +37,7 @@ Their Pico W is in a Switch 2 dock, reachable as `multiput.local` over Wi‑Fi a
 - **Line endings:** `.bat` files must stay CRLF and `.sh` files LF (enforced by `.gitattributes`).
 - **`gh pr edit` fails** on GitHub's retired "Projects (classic)". Update PR descriptions with `gh api -X PATCH repos/Arsmillis/multiput/pulls/N -F body=@file`.
 - **UDP on Windows:** a datagram bigger than the receive buffer is dropped (`WSAEMSGSIZE`), while Linux truncates it, so the Linux tests can't catch this.
-- **The packaged exe buffers its output** when piped. Time things from source with `python -u`.
+- **The packaged exe buffers plain `print` output** when piped (it ignores `PYTHONUNBUFFERED`). Status messages go through `events.say`, which flushes; time things from source with `python -u`.
 - **Bluetooth on the Pico:**
   - arduino-pico starts Bluetooth, including its key store, before `setup()`;
   - the pairing keys live inside the firmware image, so `ota.h`/`multiput_pico.ino` save and restore them across updates.

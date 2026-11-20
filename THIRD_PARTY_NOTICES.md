@@ -22,4 +22,6 @@ Built with the [arduino-pico](https://github.com/earlephilhower/arduino-pico) co
 |---|---|
 | Python runtime (Python Software Foundation) | PSF License 2.0 |
 | pySerial (Chris Liechti) | BSD 3-Clause |
+| SDL 2 (Sam Lantinga and contributors), from pysdl2-dll | zlib |
+| PySDL2 (Marcus von Appen and contributors) | Public domain (CC0), or zlib where that isn't recognised |
 | PyInstaller bootloader | GPL 2.0 with the bootloader exception, which allows distributing bundled programs under their own license |

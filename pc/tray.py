@@ -32,10 +32,10 @@ class TrayState:
 
     def __init__(self, link_name="the Pico"):
         self.link_name = link_name
-        self.pico, self.controller, self.paused, self.error = None, False, False, None
+        self.pico, self.controller, self.paused, self.error = None, None, False, None  # controller: its name
         self.busy = False  # a console task (update, performance test, status) has the Pico
 
-    def on_event(self, text, kind):
+    def on_event(self, text, kind, subject=None):
         """Update from an event; returns (title, message, warning) to notify, or None."""
         if kind == events.PICO_UP:
             was_lost = self.pico == "lost"
@@ -46,10 +46,10 @@ class TrayState:
             self.pico = "lost"
             return "Lost contact with the Pico", "Reconnecting... Inputs on the console are released meanwhile.", True
         elif kind == events.CONTROLLER_UP:
-            self.controller = True
+            self.controller = subject or "a controller"
         elif kind == events.CONTROLLER_LOST:
             notify = self.controller
-            self.controller = False
+            self.controller = None
             if notify:
                 return "Controller disconnected", "multiput will use the next controller that connects.", True
         elif kind == events.PAUSED:
@@ -79,22 +79,30 @@ class TrayState:
             return "C", GREEN
         return "W", AMBER
 
-    def tooltip(self):
+    def status_lines(self):
+        """The status, and the controller in use (when there is one)."""
         if self.error:
-            text = f"multiput: {self.error}"
+            status = f"Stopped: {self.error}"
         elif self.busy:
-            text = "multiput: busy in another window"
+            status = "Busy in another window"
         elif self.paused:
-            text = "multiput: paused (the console gets no input)"
+            status = "Paused: the console gets no input"
         elif self.pico == "lost":
-            text = "multiput: reconnecting to the Pico..."
+            status = "Reconnecting to the Pico..."
         elif self.pico != "up":
-            text = f"multiput: looking for the Pico over {self.link_name}..."
+            status = f"Looking for the Pico over {self.link_name}..."
         elif not self.controller:
-            text = "multiput: waiting for a controller"
+            status = "Waiting for a controller"
         else:
-            text = f"multiput: sending to the console over {self.link_name}"
-        return text[:127]
+            status = f"Sending to the console over {self.link_name}"
+        lines = [status]
+        if self.controller and not (self.error or self.busy):
+            lines.append(self.controller)
+        return lines
+
+    def tooltip(self):
+        """Hovering the icon: multiput, then the status lines."""
+        return "\n".join(["multiput", *self.status_lines()])[:127]  # the tray's limit
 
 
 def console_command(*args):
@@ -332,9 +340,9 @@ class TrayApp:
         self.icon = TrayIcon(self.menu, self.command)
         events.set_handler(self.on_event)
 
-    def on_event(self, text, kind):
+    def on_event(self, text, kind, subject=None):
         print(text, flush=True)  # into the log file
-        notification = self.state.on_event(text, kind)  # first: the icon must show the state after the event
+        notification = self.state.on_event(text, kind, subject)  # first: the icon must show the state after the event
         self.icon.refresh(self.state.badge(), self.state.tooltip(), notification)
 
     def start_worker(self):
@@ -405,7 +413,7 @@ class TrayApp:
         link = (self.store.load_settings(self.cfg) or {}).get("link", "wifi")
         busy = MF_GRAYED if self.busy else 0
         return [
-            (0, self.state.tooltip(), MF_GRAYED),
+            *[(0, line, MF_GRAYED) for line in self.state.status_lines()],  # a menu item can't break lines
             None,
             (PAUSE, "Resume" if self.state.paused else "Pause", busy),
             ("Link", [(LINK_WIFI, "Wi-Fi", busy | (MF_CHECKED if link == "wifi" else 0)),

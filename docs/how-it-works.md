@@ -35,7 +35,7 @@ The key requirement is the first one. Many cheap boards can't present themselves
 - In handheld mode you'd plug into the Switch 2's USB‑C port with a USB‑C OTG adapter. This hasn't been verified.
 
 **PC side:**
-- A Windows PC. The installer includes everything; XInput is built into Windows.
+- A Windows PC. The installer includes everything: XInput (Xbox controllers) is built into Windows, and SDL (other controllers) is bundled.
 - The Xbox controller connected by USB, the Xbox Wireless Adapter, or Bluetooth.
 
 ## End to end, from your seat
@@ -54,7 +54,7 @@ The key requirement is the first one. Many cheap boards can't present themselves
    Sending the first connected controller to multiput.local (192.168.1.50:41234). Ctrl+C or close this window to stop.
    Waiting for the Pico...
    Pico session started.
-   Controller connected (slot 0).
+   Controller connected: Xbox-compatible controller (slot 0).
    ```
    The Pico's LED turns **solid**.
 4. On the Switch, the new wired controller works like any wired pad. Press A in a menu and it registers.

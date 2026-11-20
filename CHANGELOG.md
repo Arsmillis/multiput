@@ -4,6 +4,17 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-19
+### Added
+- PlayStation (DualShock 4, DualSense), Switch Pro and generic controllers, read through SDL 2 (bundled). Xbox controllers stay on XInput.
+  - multiput uses the first controller that connects, Xbox controllers first, and keeps it until it disconnects.
+  - Every controller uses the Xbox button names in the mapping, by position; Switch Pro buttons map by label, so A presses A on the Switch.
+  - A controller whose layout SDL doesn't know is reported once.
+### Changed
+- The tray's tooltip shows the controller in use on its own line, under the status (e.g. "DualSense Wireless Controller", or "Xbox-compatible controller (slot 0)"), and "multiput" on a line of its own.
+- Status messages name the controller: "Controller connected: Xbox-compatible controller (slot 0)." instead of "Controller connected (slot 0)."
+- `--controller N` now means "only this Xbox controller", and leaves other controllers out.
+
 ## [0.6.0] - 2026-11-18
 ### Added
 - Mapping by pressing buttons: in the mapping editor (tray menu, Start menu, M key, or `multiput --remap`):

@@ -32,7 +32,7 @@ ask(f"init {key.hex()} 0 1 2")
 ask("fwversion " + multiput.VERSION)
 
 heard = []
-events.set_handler(lambda text, kind: heard.append((kind, text)))
+events.set_handler(lambda text, kind, subject: heard.append((kind, text)))
 
 pad_buttons = {"value": c.X_A}
 def fake_xinput(slot, state_ptr):  # one controller, in slot 1, holding pad_buttons
@@ -51,7 +51,7 @@ store.save_settings(cfg, saved)
 args = types.SimpleNamespace(controller=None)
 stop, commands = threading.Event(), queue.Queue()
 worker = threading.Thread(target=multiput.run_loop, args=(args, cfg, saved, key),
-                          kwargs=dict(stop=stop, commands=commands, get_state=fake_xinput), daemon=True)
+                          kwargs=dict(stop=stop, commands=commands, controllers=c.Controllers(c.ControllerSlot(fake_xinput))), daemon=True)
 worker.start()
 
 def wait_for(check, what, timeout=5):

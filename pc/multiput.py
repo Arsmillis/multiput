@@ -36,9 +36,10 @@ import hotkey
 import settings_store as store
 import setup_wizard
 from controller import (DEFAULT_MAP, DEFAULT_PAUSE, NEUTRAL_REPORT, PAUSE_HOLD_S, SWITCH_BUTTONS, TURBO_HZ,
-                        XBOX_BUTTONS, XINPUT_STATE, ButtonCapture, ButtonModes, ComboCapture, ControllerSlot,
-                        PauseToggle, build_report, button_map, button_names, describe_pause, held_buttons_reader,
-                        load_xinput, parse_button_list, parse_hold, parse_pause, pause_from_settings, pressed)
+                        XBOX_BUTTONS, XINPUT_STATE, ButtonCapture, ButtonModes, ComboCapture, PauseToggle,
+                        build_report, button_map, button_names, describe_pause, held_buttons_reader,
+                        open_controllers, parse_button_list, parse_hold, parse_pause, pause_from_settings,
+                        pressed)
 from links import SerialLink, UdpLink, find_bt_port
 from perf import run_perf_test
 from updater import connect, pico_status, run_update
@@ -62,7 +63,8 @@ def parse_args():
                    help="use Wi-Fi or Bluetooth to reach the Pico; remembered as the default from now on")
     p.add_argument("--bt", metavar="COMx", help="use this Bluetooth serial port; overrides the saved setting")
     p.add_argument("--controller", type=int, choices=range(4),
-                   help="XInput controller slot 0-3 (default: the first connected controller)")
+                   help="only this Xbox controller (XInput slot 0-3); default: the first connected "
+                        "controller of any kind, Xbox controllers first")
     p.add_argument("--insecure", action="store_true",
                    help="send unsigned packets (Pico must be set up with --allow-unsigned)")
     p.add_argument("--tray", action="store_true",
@@ -475,19 +477,21 @@ def main():
     run_loop(args, cfg, saved, None if args.insecure else store.load_key(cfg), keyboard=msvcrt)
 
 
-def run_loop(args, cfg, saved, key, stop=None, commands=None, keyboard=None, get_state=None):
+def run_loop(args, cfg, saved, key, stop=None, commands=None, keyboard=None, controllers=None):
     """Mirror the controller to the Pico until `stop` (threading.Event) is set.
     commands: a queue.Queue of "pause" (toggle, like the keyboard shortcut; the tray's Pause
     item). keyboard: msvcrt in the console
     (M opens the mapping editor); None in the tray. Status goes through events.say()."""
     controls = Controls(saved)
-    get_state = get_state or load_xinput()
+    controllers = controllers or open_controllers(fixed=args.controller)
     link = open_link(args, cfg, saved, stop)
     session = Session(link, key)
     if key is None:
         events.say("WARNING: sending UNSIGNED packets. Anyone who can reach the Pico can control your Switch.",
                    events.WARNING)
     which = "the first connected controller" if args.controller is None else f"controller {args.controller}"
+    if args.controller is None and controllers.sdl is None:
+        events.say("Only Xbox controllers will work: SDL (pysdl2 and pysdl2-dll) isn't available for others.")
     events.say(f"Sending {which} to {link.name}." + (" Ctrl+C or close this window to stop." if keyboard else ""))
     if saved.get("buttons"):
         changes = ", ".join(f"{x}->{sw}" for x, sw in saved["buttons"].items())
@@ -505,7 +509,6 @@ def run_loop(args, cfg, saved, key, stop=None, commands=None, keyboard=None, get
         events.say("Waiting for the Pico...")
 
     state = XINPUT_STATE()
-    slot = ControllerSlot(get_state, args.controller)
     last_report, last_sent, connected = None, 0.0, None
     try:
         while not (stop and stop.is_set()):
@@ -520,10 +523,11 @@ def run_loop(args, cfg, saved, key, stop=None, commands=None, keyboard=None, get
                 controls = edit_while_running(cfg, saved, controls, session)
                 last_report = None  # send the current state with the new settings right away
                 continue
-            ok = slot.read(state, now)
+            ok = controllers.read(state, now)
             if ok != connected:
                 if ok:
-                    events.say(f"Controller connected (slot {slot.current}).", events.CONTROLLER_UP)
+                    name = controllers.describe()
+                    events.say(f"Controller connected: {name}.", events.CONTROLLER_UP, name)
                 else:
                     events.say("Controller not connected; waiting...", events.CONTROLLER_LOST)
                 connected = ok
