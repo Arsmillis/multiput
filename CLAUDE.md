@@ -15,7 +15,7 @@ multiput sends one controller's input to the PC and a console at once:
   - set `VERSION` (MINOR for features, PATCH for fixes, MAJOR only after 1.0 for incompatible changes);
   - add the change under `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`, using the expected release date. If another open PR already bumped to that version, add to its section.
 - **Documentation-only PRs need no release:** don't change `VERSION`, and don't add a changelog entry. That covers the README, `docs/`, `CLAUDE.md`, `TODO` and comments.
-- **Releasing** is the maintainer's job: `tools/release.sh` after merging. It refuses to run off `main`, or when local `main` differs from `origin/main`.
+- **Releasing** is the maintainer's job: `tools/release.sh` after merging. It refuses to run off `main`, or when local `main` differs from `origin/main`. `tools/release.sh --verify` checks a published release against the local build in about a second (any branch, read-only).
 - **Every source file** starts with the SPDX licence and copyright header (Apache-2.0, Copyright (C) 2026 Arsmillis).
 
 ## Commands

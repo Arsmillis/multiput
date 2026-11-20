@@ -54,7 +54,7 @@ multiput/
 │   ├── test_setup.py       .uf2 settings patching and the --setup flow
 │   ├── test_controller.py  button mapping, --remap, pause combos, M-key editing
 │   ├── test_perf.py        the performance test's measuring logic, against a fake Pico
-│   ├── test_release.py     release notes generation
+│   ├── test_release.py     release notes generation, release.sh --verify
 │   ├── test_loop.py        run_loop on a thread with stop and commands, as the tray runs it
 │   └── test_tray.py        the tray's status logic (icon colour, tooltip, notifications)
 └── build/                  everything generated (git-ignored)
@@ -147,11 +147,13 @@ multiput uses [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, s
    - builds and tests everything with `tools\build.bat`;
    - tags `vX.Y.Z` and pushes the tag;
    - creates the GitHub release with notes from the changelog and SHA-256 checksums;
-   - attaches the installer and `multiput.uf2`, then downloads them back to check them.
+   - attaches the installer and `multiput.uf2`, then checks them: the SHA-256 GitHub records for each upload must match the local build (nothing is downloaded, so this takes a second).
 
 **Releases only come from `main`:** a real run refuses to start on any other branch, or on a detached HEAD such as a checked-out tag, and names where you are. Just before tagging and publishing, after the build, it checks again that you're still on `main` at the same commit. The commit must also be the current tip of `origin/main`.
 
 `tools/release.sh --dry-run` does the build and writes `build/release-notes.md`, without changing anything on GitHub. It works on any branch, with a note that a real release needs `main`.
+
+**Checking a published release:** `tools/release.sh --verify` compares the `vX.Y.Z` release for the current `VERSION` with the local build: `build/installer/multiput-setup-X.Y.Z.exe` and `build/firmware/multiput.uf2`. It uses the SHA-256 that GitHub records for each file, so it takes about a second. It doesn't build, works on any branch, and changes nothing. Use it after a release that was interrupted, or to confirm GitHub serves exactly what was built. If it reports a mismatch or a missing file, republish (below).
 
 **Republishing** (for example after a broken upload, or to fix the notes): run `tools/release.sh` again on the same commit. It rebuilds, replaces the files and notes on the existing release, and leaves the tag alone. If the tag already points at a different commit, the script refuses: a published version shouldn't change contents, so bump `VERSION` and release that instead.
 
@@ -161,4 +163,4 @@ multiput uses [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`, s
 - `python3 tests/test_setup.py`: settings patching (including the built `.uf2` files) and the `--setup` flow.
 - `python3 tests/test_controller.py`: button mapping, `--remap`, pause combos, M-key editing, and reading controllers (XInput slots, SDL against a fake SDL, and choosing between them).
 - `python3 tests/test_perf.py`: the performance test's measuring logic, against a fake Pico.
-- `python3 tests/test_release.py`: release notes generation.
+- `python3 tests/test_release.py`: release notes generation, and `tools/release.sh --verify` against a fake `gh`.
